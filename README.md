@@ -40,6 +40,24 @@ I temi `glass` e `glass-clear` usano il materiale Liquid Glass di macOS 26+ (`NS
 si vede attraverso il pannello, sfocato, con un bordo luminoso. Sulle versioni precedenti si ripiega su una
 sfocatura classica. Il materiale si può usare anche con gli altri temi: `"material": "glass"`.
 
+## Avviso a fine comando
+
+Lanci una build lunga e chiudi il terminale: quando finisce, il notch si allarga con il comando, l'esito
+(✓ o ✗ con il codice d'uscita) e la durata. Un clic sull'avviso riapre il terminale su quella scheda.
+Se il terminale è aperto su un'altra scheda, quella scheda mostra ✓ o ✗ nel titolo.
+
+Per default l'avviso compare per i comandi che durano almeno 10 secondi; si regola in Impostazioni → Shell
+o con `commandNotify` nel config.
+
+Funziona con **zsh** (la shell predefinita di macOS) grazie a una piccola integrazione che NotchTerm attiva
+da solo: zsh parte con `ZDOTDIR` puntato a `~/Library/Application Support/NotchTerm/shell-integration/zsh`,
+il cui `.zshenv` ripristina subito il tuo `ZDOTDIR`, carica i tuoi file di avvio come sempre e aggiunge due hook.
+Si disattiva con `"shellIntegration": false`.
+
+Con altre shell basta emettere a fine comando la sequenza
+`ESC ] 7501 ; id=notchterm : state=done|error : title=<comando in base64> : msg=<"codice durata" in base64> BEL`
+(e `state=working` all'inizio).
+
 ## Spotify e Apple Music
 
 NotchTerm segue il brano in riproduzione su Spotify o Apple Music:
@@ -85,6 +103,8 @@ Si ricarica **da solo al salvataggio**. Basta scrivere le chiavi da cambiare, pe
 | `newTabInheritsDirectory` | `true` | Le nuove schede si aprono nella cartella della scheda corrente |
 | `maxTabWidth` | `170` | Larghezza massima di una linguetta |
 | `media` | `{"enabled": true, "showInHeader": true, "peekOnTrackChange": true, "peekDuration": 4}` | Spotify / Apple Music |
+| `commandNotify` | `{"enabled": true, "minDuration": 10, "notifyOnSuccess": true}` | Avviso a fine comando |
+| `shellIntegration` | `true` | Integrazione zsh (serve all'avviso a fine comando) |
 | `fallbackNotchWidth` | `190` | Larghezza del notch simulato sugli schermi senza notch |
 
 Esempio:
@@ -120,7 +140,7 @@ Quando la shell di una scheda termina (`exit`) la scheda si chiude; se era l'ult
 
 ## Altre scorciatoie dentro il terminale
 
-⌘C copia · ⌘V incolla · ⌘A seleziona tutto · ⌘K pulisci · ⌘+ / ⌘− / ⌘0 dimensione testo · ⌘, impostazioni
+⌘F cerca nello storico (⌘G / ⌘⇧G successivo / precedente, Esc chiude) · ⌘C copia · ⌘V incolla · ⌘A seleziona tutto · ⌘K pulisci · ⌘+ / ⌘− / ⌘0 dimensione testo · ⌘, impostazioni
 
 ## Aprire da script
 
@@ -138,8 +158,9 @@ Sostituisci `toggle` con `newtab` per una nuova scheda, `settings` per le impost
 - `Sources/NotchTerm/TabBar.swift` — linguette nell'header
 - `Sources/NotchTerm/Config.swift` — configurazione JSON e ricarica automatica
 - `Sources/NotchTerm/Themes.swift` — temi inclusi e materiale di sfondo
+- `Sources/NotchTerm/ShellIntegration.swift` — hook zsh per inizio/fine comando
 - `Sources/NotchTerm/NowPlaying.swift` — Spotify / Apple Music: stato, comandi, copertine
-- `Sources/NotchTerm/MediaViews.swift` — mini-player e avviso al cambio brano
+- `Sources/NotchTerm/MediaViews.swift` — mini-player e avvisi dal notch (brano, fine comando)
 - `Sources/NotchTerm/Settings.swift` — finestra Impostazioni (SwiftUI)
 - `Sources/NotchTerm/HotKey.swift` — scorciatoia globale (Carbon, nessun permesso richiesto)
 - `Sources/NotchTerm/main.swift` — app e menu nella barra

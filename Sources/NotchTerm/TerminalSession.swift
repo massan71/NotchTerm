@@ -10,6 +10,12 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     var onChange: ((TerminalSession) -> Void)?
     var onExit: ((TerminalSession) -> Void)?
+    var onCommandFinished: ((TerminalSession, CommandResult) -> Void)?
+
+    /// Comando in esecuzione (dagli hook della shell), se c'è.
+    private(set) var runningCommand: String?
+    /// Esito non ancora visto (scheda in secondo piano): "✓" o "✗".
+    var badge: String?
 
     init(frame: NSRect) {
         view = LocalProcessTerminalView(frame: frame)
@@ -29,6 +35,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         env.append("COLORTERM=truecolor")
         if !env.contains(where: { $0.hasPrefix("LANG=") }) { env.append("LANG=en_US.UTF-8") }
         for (k, v) in config.env { env.append("\(k)=\(v)") }
+        if config.shellIntegration { env += ShellIntegration.environment(forShell: shell) }
 
         var dir = directory ?? (config.workingDirectory as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
@@ -73,6 +80,12 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
 
     /// Titolo breve per la linguetta della scheda.
     var shortTitle: String {
+        let base = plainShortTitle
+        return badge.map { "\($0) \(base)" } ?? base
+    }
+
+    /// Titolo breve senza il segno ✓/✗.
+    var plainShortTitle: String {
         if !shellTitle.isEmpty {
             // "utente@host:~/progetti/app" → "app"
             if shellTitle.contains("@"), let colon = shellTitle.lastIndex(of: ":") {
@@ -99,6 +112,25 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         guard let directory else { return }
         cwd = URL(string: directory)?.path ?? directory
         onChange?(self)
+    }
+
+    /// Gli hook zsh riportano lo stato con OSC 7501 (vedi ShellIntegration).
+    func programStatusChanged(source: TerminalView, records: [TerminalProgramStatus]) {
+        guard let r = records.first(where: { $0.id == ShellIntegration.recordID }) else { return }
+        switch r.state {
+        case .working:
+            runningCommand = r.title ?? ""
+        case .done, .error:
+            // Si avvisa solo nel passaggio da "in esecuzione" a "terminato".
+            guard runningCommand != nil else { return }
+            runningCommand = nil
+            let parts = (r.message ?? "").split(separator: " ")
+            let code = parts.first.flatMap { Int($0) } ?? (r.state == .error ? 1 : 0)
+            let duration = parts.count > 1 ? (Double(parts[1]) ?? 0) : 0
+            onCommandFinished?(self, CommandResult(command: r.title ?? "", exitCode: code, duration: duration))
+        default:
+            break
+        }
     }
 
     func processTerminated(source: TerminalView, exitCode: Int32?) {

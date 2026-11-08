@@ -152,6 +152,9 @@ final class NotchController: NSObject {
     var onOpenConfig: (() -> Void)?
     /// Chiamato appena prima di aprire il pannello.
     var onWillOpen: (() -> Void)?
+    /// Un comando lungo è terminato mentre il pannello era chiuso.
+    /// Parametri: esito, titolo della scheda (se più di una), azione per mostrarla.
+    var onCommandNotify: ((CommandResult, String?, @escaping () -> Void) -> Void)?
 
     var tabCount: Int { sessions.count }
 
@@ -282,6 +285,7 @@ final class NotchController: NSObject {
         s.view.isHidden = true
         s.onChange = { [weak self] _ in self?.refreshTabBar() }
         s.onExit = { [weak self] in self?.sessionExited($0) }
+        s.onCommandFinished = { [weak self] in self?.commandFinished($0, $1) }
         root.addSubview(s.view)
         root.bringBorderToFront()
         let insertAt = sessions.isEmpty ? 0 : selectedIndex + 1
@@ -294,6 +298,7 @@ final class NotchController: NSObject {
         guard sessions.indices.contains(index) else { return }
         selectedIndex = index
         for (i, s) in sessions.enumerated() { s.view.isHidden = i != index }
+        if isOpen { sessions[index].badge = nil }
         if isOpen { panel.makeFirstResponder(current.view) }
         current.refreshDirectory()
         refreshTabBar()
@@ -326,6 +331,31 @@ final class NotchController: NSObject {
         guard sessions.indices.contains(to) else { return }
         sessions.swapAt(selectedIndex, to)
         selectTab(to)
+    }
+
+    #if DEBUG
+    func debugType(_ text: String) { current.view.send(txt: text) }
+    #endif
+
+    // MARK: - Fine comando
+
+    private func commandFinished(_ s: TerminalSession, _ result: CommandResult) {
+        let cfg = config.commandNotify
+        guard cfg.enabled, result.duration >= cfg.minDuration,
+              cfg.notifyOnSuccess || !result.succeeded,
+              let index = sessions.firstIndex(where: { $0 === s }) else { return }
+        // Già sotto gli occhi dell'utente: niente avviso.
+        if isOpen && index == selectedIndex { return }
+        s.badge = result.succeeded ? "✓" : "✗"
+        refreshTabBar()
+        if !isOpen {
+            let tab = sessions.count > 1 ? s.plainShortTitle : nil
+            onCommandNotify?(result, tab) { [weak self, weak s] in
+                guard let self, let s, let i = self.sessions.firstIndex(where: { $0 === s }) else { return }
+                self.selectTab(i)
+                self.open()
+            }
+        }
     }
 
     private func sessionExited(_ s: TerminalSession) {
@@ -457,6 +487,7 @@ final class NotchController: NSObject {
         panel.makeKey()
         panel.makeFirstResponder(current.view)
         current.refreshDirectory()
+        if current.badge != nil { current.badge = nil; refreshTabBar() }
         animateMask(from: from, to: expandedPath(), opening: true, completion: nil)
 
         for v in fadingViews { v.alphaValue = 0 }
@@ -514,6 +545,13 @@ final class NotchController: NSObject {
 
     // MARK: - Scorciatoie dentro il pannello
 
+    /// Usa la barra di ricerca integrata di SwiftTerm (si chiude con Esc).
+    private func findAction(_ action: NSFindPanelAction) {
+        let item = NSMenuItem()
+        item.tag = Int(action.rawValue)
+        current.view.performFindPanelAction(item)
+    }
+
     private static let digitKeyCodes: [Int: Int] = [
         kVK_ANSI_1: 1, kVK_ANSI_2: 2, kVK_ANSI_3: 3, kVK_ANSI_4: 4, kVK_ANSI_5: 5,
         kVK_ANSI_6: 6, kVK_ANSI_7: 7, kVK_ANSI_8: 8, kVK_ANSI_9: 9,
@@ -548,6 +586,8 @@ final class NotchController: NSObject {
             if code == kVK_RightArrow { moveTab(1); return true }
         }
 
+        if mods == [.command, .shift], code == kVK_ANSI_G { findAction(.previous); return true }
+
         guard mods == [.command], let key = e.charactersIgnoringModifiers?.lowercased() else {
             // ⌘⇧= (⌘+ su molte tastiere)
             if mods == [.command, .shift], e.charactersIgnoringModifiers == "+" {
@@ -557,6 +597,8 @@ final class NotchController: NSObject {
         }
         let terminal = current.view
         switch key {
+        case "f": findAction(.showFindPanel); return true
+        case "g": findAction(.next); return true
         case "t": newTabAction(); return true
         case "w": closeTab(at: selectedIndex); return true
         case "c": terminal.copy(self); return true

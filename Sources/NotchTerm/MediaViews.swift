@@ -71,7 +71,17 @@ final class ArtworkView: NSImageView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Icona di sistema al posto della copertina (es. esito di un comando).
+    func setSymbol(_ name: String, color: NSColor) {
+        image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 26, weight: .semibold))
+        layer?.backgroundColor = color.withAlphaComponent(0.18).cgColor
+        contentTintColor = color
+        imageScaling = .scaleNone
+    }
+
     func set(_ artwork: NSImage?, tint: NSColor) {
+        imageScaling = .scaleProportionallyUpOrDown
         if let artwork {
             image = artwork
             layer?.backgroundColor = .clear
@@ -139,8 +149,8 @@ final class HeaderMediaView: NSView {
 
 // MARK: - Avviso al cambio brano
 
-/// Quando cambia brano a terminale chiuso, il notch si allarga per qualche secondo
-/// mostrando copertina, titolo e artista (in stile Dynamic Island).
+/// Avvisi dal notch: si allarga per qualche secondo (in stile Dynamic Island)
+/// per mostrare il brano appena iniziato o l'esito di un comando lungo.
 @MainActor
 final class PeekController {
     private let panel: NotchPanel
@@ -154,6 +164,9 @@ final class PeekController {
     private var metrics = NotchMetrics(width: 190, height: 32, hasHardwareNotch: false)
     private var hideTimer: Timer?
     private(set) var isShowing = false
+    private enum Mode { case media, command }
+    private var mode = Mode.media
+    private var onContentClick: (() -> Void)?
     var config: Config
 
     var onPlayPause: (() -> Void)? { didSet { buttons.onPlayPause = onPlayPause } }
@@ -184,7 +197,10 @@ final class PeekController {
         }
         content.addSubview(art)
         content.addSubview(buttons)
-        content.onClick = { [weak self] in self?.onActivate?() }
+        content.onClick = { [weak self] in
+            self?.onContentClick?()
+            self?.hide()
+        }
         root.addSubview(content)
         root.bringBorderToFront()
         // Nero come il notch hardware, così sembra il notch che si allarga.
@@ -192,9 +208,37 @@ final class PeekController {
     }
 
     func show(track: NowPlayingTrack, artwork: NSImage?) {
+        mode = .media
+        onContentClick = onActivate
+        buttons.isHidden = false
         fill(track: track, artwork: artwork)
-        scheduleHide()
-        guard !isShowing else { return }
+        present(duration: config.media.peekDuration)
+    }
+
+    /// Esito di un comando terminato. Un clic sull'avviso esegue `onClick`.
+    func show(command result: CommandResult, tab: String?, onClick: @escaping () -> Void) {
+        mode = .command
+        onContentClick = onClick
+        buttons.isHidden = true
+        let ok = result.succeeded
+        art.setSymbol(ok ? "checkmark" : "xmark",
+                      color: ok ? NSColor(srgbRed: 0.35, green: 0.86, blue: 0.5, alpha: 1)
+                                : NSColor(srgbRed: 1, green: 0.42, blue: 0.4, alpha: 1))
+        titleLabel.stringValue = result.command.isEmpty ? "Comando terminato" : result.command
+        titleLabel.font = .monospacedSystemFont(ofSize: 12.5, weight: .semibold)
+        titleLabel.textColor = .white
+        let time = CommandResult.format(result.duration)
+        var detail = ok ? "Completato in \(time)" : "Errore \(result.exitCode) dopo \(time)"
+        if let tab { detail += "  ·  \(tab)" }
+        artistLabel.stringValue = detail
+        artistLabel.textColor = NSColor.white.withAlphaComponent(0.6)
+        // Gli errori restano visibili un po' di più.
+        present(duration: ok ? 5 : 8)
+    }
+
+    private func present(duration: Double) {
+        scheduleHide(after: duration)
+        guard !isShowing else { layoutLabels(); return }
         isShowing = true
         layout()
         let collapsed = collapsedPath()
@@ -211,7 +255,7 @@ final class PeekController {
 
     /// Aggiorna i dati se l'avviso è già visibile (es. play/pausa dal suo pulsante).
     func refresh(track: NowPlayingTrack?, artwork: NSImage?) {
-        guard isShowing else { return }
+        guard isShowing, mode == .media else { return }
         guard let track else { hide(); return }
         fill(track: track, artwork: artwork)
     }
@@ -236,9 +280,9 @@ final class PeekController {
         }
     }
 
-    private func scheduleHide() {
+    private func scheduleHide(after duration: Double) {
         hideTimer?.invalidate()
-        hideTimer = Timer.scheduledTimer(withTimeInterval: max(1, config.media.peekDuration), repeats: false) { [weak self] _ in
+        hideTimer = Timer.scheduledTimer(withTimeInterval: max(1, duration), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 // Con il mouse sopra l'avviso resta aperto.
@@ -265,6 +309,7 @@ final class PeekController {
 
     private func fill(track: NowPlayingTrack, artwork: NSImage?) {
         art.set(artwork, tint: .white)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.stringValue = track.title
         titleLabel.textColor = .white
         artistLabel.stringValue = track.artist.isEmpty ? track.album : track.artist
@@ -293,8 +338,14 @@ final class PeekController {
         art.frame = NSRect(x: 0, y: (ch - 40) / 2, width: 40, height: 40)
         let bw = buttons.preferredWidth
         buttons.frame = NSRect(x: content.bounds.width - bw, y: (ch - 26) / 2, width: bw, height: 26)
+        layoutLabels()
+    }
+
+    private func layoutLabels() {
+        let ch = content.bounds.height
         let tx = art.frame.maxX + 11
-        let tw = max(0, buttons.frame.minX - tx - 10)
+        let right = buttons.isHidden ? content.bounds.width : buttons.frame.minX - 10
+        let tw = max(0, right - tx)
         titleLabel.frame = NSRect(x: tx, y: ch / 2 + 1, width: tw, height: 17)
         artistLabel.frame = NSRect(x: tx, y: ch / 2 - 16, width: tw, height: 15)
     }

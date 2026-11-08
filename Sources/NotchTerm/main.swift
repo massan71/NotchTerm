@@ -36,6 +36,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DistributedNotificationCenter.default().addObserver(forName: .init("net.sangalli.notchterm.settings"), object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.showSettings() }
         }
+        #if DEBUG
+        // Solo nelle build di debug: scrive testo nella scheda corrente (per i test automatici).
+        DistributedNotificationCenter.default().addObserver(forName: .init("net.sangalli.notchterm.debug-type"), object: nil, queue: .main) { [weak self] n in
+            let text = n.userInfo?["text"] as? String ?? ""
+            MainActor.assumeIsolated { self?.controller.debugType(text) }
+        }
+        #endif
         watcher = ConfigWatcher { [weak self] in self?.reloadConfig(silent: true) }
         if let error { showError(error) }
     }
@@ -66,6 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 self.peek.refresh(track: track, artwork: art)
             }
+        }
+        controller.onCommandNotify = { [weak self] result, tab, show in
+            self?.peek.show(command: result, tab: tab, onClick: show)
         }
         controller.onWillOpen = { [weak self] in
             self?.peek.hide(immediately: true)

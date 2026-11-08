@@ -29,6 +29,15 @@ struct Config: Codable, Equatable {
         var peekDuration: Double = 4
     }
 
+    /// Avviso dal notch quando termina un comando lungo.
+    struct CommandNotify: Codable, Equatable {
+        var enabled: Bool = true
+        /// Durata minima (secondi) perché un comando meriti l'avviso.
+        var minDuration: Double = 10
+        /// Avvisa anche quando il comando va a buon fine (non solo in caso di errore).
+        var notifyOnSuccess: Bool = true
+    }
+
     /// Colori che sovrascrivono quelli del tema. Formato "#RRGGBB".
     struct Colors: Codable, Equatable {
         var background: String?
@@ -81,6 +90,9 @@ struct Config: Codable, Equatable {
 
     var animation: Animation = Animation()
     var media: Media = Media()
+    var commandNotify: CommandNotify = CommandNotify()
+    /// Integrazione zsh: serve all'avviso a fine comando.
+    var shellIntegration: Bool = true
     /// Chiude il pannello quando si clicca altrove.
     var hideOnFocusLoss: Bool = true
     /// Su quale schermo aprire: "notch" (quello col notch, se c'è), "main", "mouse".

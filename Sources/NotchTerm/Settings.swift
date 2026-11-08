@@ -363,6 +363,20 @@ private struct ShellTab: View {
                 Toggle("Option come tasto Meta", isOn: $model.config.optionAsMeta)
             }
             Section {
+                Toggle("Avvisa dal notch quando finisce un comando lungo", isOn: $model.config.commandNotify.enabled)
+                LabeledSlider(title: "Durata minima", value: $model.config.commandNotify.minDuration, range: 3...120,
+                              format: { v in CommandResult.format(v) })
+                    .disabled(!model.config.commandNotify.enabled)
+                Toggle("Avvisa anche quando va a buon fine", isOn: $model.config.commandNotify.notifyOnSuccess)
+                    .disabled(!model.config.commandNotify.enabled)
+                Toggle("Integrazione con la shell (zsh)", isOn: $model.config.shellIntegration)
+            } header: {
+                Text("Fine comando")
+            } footer: {
+                Text("L'avviso compare quando il terminale è chiuso; se è aperto su un'altra scheda, la scheda mostra ✓ o ✗. Richiede zsh con l'integrazione attiva: vale per le schede aperte da quel momento.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Text("Le variabili d'ambiente (\"env\") si impostano in config.json. Cambiare shell o argomenti riavvia la scheda corrente.")
                     .font(.caption).foregroundStyle(.secondary)
             }
