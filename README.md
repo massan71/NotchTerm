@@ -3,6 +3,16 @@
 Terminale a tendina (stile Quake) per macOS che esce dal notch. Premi la scorciatoia e il notch
 si allarga in un terminale vero; premila di nuovo e rientra.
 
+## Installare
+
+Scarica `NotchTerm-x.y.z.zip` dalle [Release](https://github.com/massan71/NotchTerm/releases), estrai e sposta
+`NotchTerm.app` in Applicazioni. L'app non è notarizzata: la prima volta macOS la blocca. Apri
+Impostazioni di Sistema → Privacy e sicurezza → "Apri comunque", oppure da Terminale:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/NotchTerm.app
+```
+
 ## Compilare e avviare
 
 Bastano i Command Line Tools (non serve Xcode):
@@ -11,6 +21,8 @@ Bastano i Command Line Tools (non serve Xcode):
 make run        # compila e avvia build/NotchTerm.app
 make install    # copia in /Applications e avvia
 ```
+
+`build.sh` produce un'app universale (Apple Silicon + Intel); `ARCH=arm64 ./build.sh` compila solo una architettura.
 
 L'app vive nella barra dei menu (icona terminale) e non ha icona nel Dock.
 Scorciatoia predefinita: **⌃`** (Control + backtick).

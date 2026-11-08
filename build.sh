@@ -4,14 +4,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP="$ROOT/build/NotchTerm.app"
 
+# ARCH=universal (default) compila arm64 + x86_64; ARCH=arm64 o ARCH=x86_64 una sola.
+ARCH="${ARCH:-universal}"
+if [ "$ARCH" = "universal" ]; then SLICES=(arm64 x86_64); else SLICES=("$ARCH"); fi
+
 cd "$ROOT"
-swift build -c release
-BIN="$(swift build -c release --show-bin-path)/NotchTerm"
+OBJ="$(mktemp -d)"
+for slice in "${SLICES[@]}"; do
+    echo "→ $slice"
+    TRIPLE="${slice}-apple-macosx13.0"
+    swift build -c release --triple "$TRIPLE"
+    # Le architetture condividono la cartella di output: si copia subito.
+    cp "$(swift build -c release --triple "$TRIPLE" --show-bin-path)/NotchTerm" "$OBJ/NotchTerm-$slice"
+done
+BIN="$OBJ/NotchTerm"
+lipo -create "$OBJ"/NotchTerm-* -output "$BIN"
 
 # Il bundle si assembla e si firma fuori da ~/Documents: se la cartella è
 # sincronizzata con iCloud, il sistema aggiunge attributi che codesign rifiuta.
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+trap 'rm -rf "$STAGE" "$OBJ"' EXIT
 S="$STAGE/NotchTerm.app"
 mkdir -p "$S/Contents/MacOS" "$S/Contents/Resources"
 cp "$BIN" "$S/Contents/MacOS/NotchTerm"
