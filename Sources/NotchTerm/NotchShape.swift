@@ -48,3 +48,56 @@ struct NotchMetrics {
         return NotchMetrics(width: fallbackWidth, height: menuBar, hasHardwareNotch: false)
     }
 }
+
+extension NotchMetrics {
+    /// Lo schermo su cui mostrare il pannello secondo l'opzione "screen".
+    static func targetScreen(_ config: Config) -> NSScreen {
+        switch config.screen.lowercased() {
+        case "mouse":
+            let p = NSEvent.mouseLocation
+            return NSScreen.screens.first { NSMouseInRect(p, $0.frame, false) } ?? NSScreen.screens[0]
+        case "main":
+            return NSScreen.screens[0]
+        default:
+            return NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.screens[0]
+        }
+    }
+}
+
+/// Anima il contorno di più CAShapeLayer insieme (maschera + bordo),
+/// con molla in apertura e accelerazione in chiusura.
+enum ShapeAnimator {
+    static func animate(_ layers: [CAShapeLayer], from: CGPath, to: CGPath, opening: Bool,
+                        animation a: Config.Animation, speed: Double = 1, completion: (() -> Void)?) {
+        for l in layers { l.removeAllAnimations() }
+        CATransaction.begin()
+        CATransaction.setCompletionBlock(completion)
+        CATransaction.setDisableActions(true)
+        for l in layers { l.path = to }
+
+        let style = a.style.lowercased()
+        let duration = a.duration * speed
+        if style != "none" && duration > 0 {
+            let anim: CABasicAnimation
+            if opening && style == "spring" {
+                let s = CASpringAnimation(keyPath: "path")
+                let omega = 2 * Double.pi / max(0.05, duration)
+                s.mass = 1
+                s.stiffness = omega * omega
+                s.damping = 2 * max(0.1, min(1.0, a.damping)) * omega
+                s.duration = s.settlingDuration
+                anim = s
+            } else {
+                anim = CABasicAnimation(keyPath: "path")
+                anim.duration = opening ? duration : duration * 0.6
+                anim.timingFunction = opening
+                    ? CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+                    : CAMediaTimingFunction(controlPoints: 0.5, 0, 0.75, 0)
+            }
+            anim.fromValue = from
+            anim.toValue = to
+            for l in layers { l.add(anim, forKey: "path") }
+        }
+        CATransaction.commit()
+    }
+}

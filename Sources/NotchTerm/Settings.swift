@@ -13,6 +13,7 @@ final class SettingsModel: ObservableObject {
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var onTryAnimation: (() -> Void)?
+    var onTryPeek: (() -> Void)?
     var onOpenConfigFile: (() -> Void)?
 
     private var lastSaved: Config
@@ -171,6 +172,7 @@ struct SettingsView: View {
             GeneralTab(model: model).tabItem { Label("Generale", systemImage: "gearshape") }
             AppearanceTab(model: model).tabItem { Label("Aspetto", systemImage: "paintpalette") }
             AnimationTab(model: model).tabItem { Label("Animazione", systemImage: "wand.and.rays") }
+            MusicTab(model: model).tabItem { Label("Musica", systemImage: "music.note") }
             ShellTab(model: model).tabItem { Label("Shell", systemImage: "terminal") }
         }
         .padding(.top, 8)
@@ -317,6 +319,33 @@ private struct AnimationTab: View {
     }
 
     private func tryAnimation() { model.onTryAnimation?() }
+}
+
+private struct MusicTab: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Controlla Spotify e Apple Music", isOn: $model.config.media.enabled)
+            } footer: {
+                Text("Per comandare la riproduzione macOS chiede una volta il permesso di Automazione. Il lettore non viene mai avviato da NotchTerm.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Dove") {
+                Toggle("Mini-player a destra del notch", isOn: $model.config.media.showInHeader)
+                Toggle("Mostra il brano quando cambia", isOn: $model.config.media.peekOnTrackChange)
+                LabeledSlider(title: "Durata avviso", value: $model.config.media.peekDuration, range: 2...10,
+                              format: { v in "\(Int(v.rounded())) s" })
+                    .disabled(!model.config.media.peekOnTrackChange)
+                Button("Prova l'avviso") { tryPeek() }
+            }
+            .disabled(!model.config.media.enabled)
+        }
+        .formStyle(.grouped)
+    }
+
+    private func tryPeek() { model.onTryPeek?() }
 }
 
 private struct ShellTab: View {

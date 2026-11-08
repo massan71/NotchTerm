@@ -8,12 +8,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var lastError: String?
     private var settings: SettingsWindowController?
+    private let nowPlaying = NowPlayingMonitor()
+    private var peek: PeekController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let (config, error) = ConfigStore.load()
         lastError = error
         controller = NotchController(config: config)
         controller.onOpenConfig = { [weak self] in self?.showSettings() }
+        setUpMedia(config)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "NotchTerm")
@@ -37,6 +40,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let error { showError(error) }
     }
 
+    private func setUpMedia(_ config: Config) {
+        peek = PeekController(config: config)
+        nowPlaying.enabled = config.media.enabled
+        let np = nowPlaying
+        for target in [controller.mediaView.buttons] {
+            target.onPlayPause = { np.playPause() }
+            target.onNext = { np.next() }
+            target.onPrevious = { np.previous() }
+        }
+        controller.mediaView.onActivate = { np.activatePlayer() }
+        peek.onPlayPause = { np.playPause() }
+        peek.onNext = { np.next() }
+        peek.onPrevious = { np.previous() }
+        peek.onActivate = { np.activatePlayer() }
+
+        nowPlaying.onChange = { [weak self] trackChanged in
+            guard let self else { return }
+            let track = self.nowPlaying.track
+            let art = self.nowPlaying.artwork
+            self.controller.updateMedia(track: track, artwork: art)
+            let media = self.controller.config.media
+            if trackChanged, let track, track.isPlaying, media.enabled, media.peekOnTrackChange, !self.controller.isOpen {
+                self.peek.show(track: track, artwork: art)
+            } else {
+                self.peek.refresh(track: track, artwork: art)
+            }
+        }
+        controller.onWillOpen = { [weak self] in
+            self?.peek.hide(immediately: true)
+            self?.nowPlaying.refreshIfNeeded()
+        }
+        // Per provare l'avviso dalle impostazioni o da script.
+        DistributedNotificationCenter.default().addObserver(forName: .init("net.sangalli.notchterm.peek"), object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showPeekPreview() }
+        }
+    }
+
+    func showPeekPreview() {
+        let sample = NowPlayingTrack(source: .spotify, id: "preview", title: "Brano di esempio",
+                                     artist: "NotchTerm", album: "", isPlaying: true)
+        peek.show(track: nowPlaying.track ?? sample, artwork: nowPlaying.artwork)
+    }
+
     private func registerHotKey() {
         hotKey = nil
         hotKey = HotKey(controller.config.hotkey) { [weak self] in self?.controller.toggle() }
@@ -56,6 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastError = nil
         let hotkeyChanged = config.hotkey != controller.config.hotkey
         controller.update(config: config)
+        peek.config = config
+        nowPlaying.enabled = config.media.enabled
         settings?.model.externalUpdate(config)
         if hotkeyChanged { registerHotKey() }
     }
@@ -140,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let model = SettingsModel(config: controller.config)
             model.onTryAnimation = { [weak self] in self?.controller.toggle() }
             model.onOpenConfigFile = { [weak self] in self?.openConfig() }
+            model.onTryPeek = { [weak self] in self?.showPeekPreview() }
             settings = SettingsWindowController(model: model)
         }
         controller.close()

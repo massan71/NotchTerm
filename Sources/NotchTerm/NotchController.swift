@@ -6,8 +6,10 @@ import SwiftTerm
 /// (come Spotlight): il focus dell'app sotto resta intatto.
 final class NotchPanel: NSPanel {
     var keyHandler: ((NSEvent) -> Bool)?
+    /// false per i pannelli che mostrano solo informazioni (es. l'avviso musicale).
+    var allowsKeyFocus = true
 
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { allowsKeyFocus }
     override var canBecomeMain: Bool { false }
 
     /// Le scorciatoie si intercettano qui, prima che arrivino al terminale:
@@ -114,6 +116,9 @@ final class NotchRootView: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        tintView.frame = bounds
+        borderView.frame = bounds
+        backdrop?.frame = bounds
         maskLayer.frame = bounds
         borderGradient.frame = bounds   // gradiente dall'alto (y=1 in AppKit) al basso
         borderGradient.startPoint = CGPoint(x: 0.5, y: 1)
@@ -130,6 +135,9 @@ final class NotchController: NSObject {
     private let root: NotchRootView
     private let tabBar = TabBarView()
     private let newTabButton = NSButton()
+    let mediaView = HeaderMediaView()
+    private var mediaTrack: NowPlayingTrack?
+    private var mediaArtwork: NSImage?
 
     private var sessions: [TerminalSession] = []
     private var selectedIndex = 0
@@ -142,6 +150,8 @@ final class NotchController: NSObject {
     private var terminalFrame = NSRect(x: 0, y: 0, width: 500, height: 250)
 
     var onOpenConfig: (() -> Void)?
+    /// Chiamato appena prima di aprire il pannello.
+    var onWillOpen: (() -> Void)?
 
     var tabCount: Int { sessions.count }
 
@@ -177,6 +187,7 @@ final class NotchController: NSObject {
         newTabButton.target = self
         newTabButton.action = #selector(newTabAction)
         root.addSubview(newTabButton)
+        root.addSubview(mediaView)
 
         NotificationCenter.default.addObserver(self, selector: #selector(panelResignedKey),
                                                name: NSWindow.didResignKeyNotification, object: panel)
@@ -211,6 +222,7 @@ final class NotchController: NSObject {
                         tint: bg.withAlphaComponent(CGFloat(surface.opacity)),
                         border: CGFloat(surface.borderOpacity))
         newTabButton.contentTintColor = foreground.withAlphaComponent(0.6)
+        refreshMedia()
         tabBar.maxTabWidth = CGFloat(config.maxTabWidth)
         for s in sessions { style(s.view) }
         refreshTabBar()
@@ -356,17 +368,7 @@ final class NotchController: NSObject {
 
     // MARK: - Geometria
 
-    private func targetScreen() -> NSScreen {
-        switch config.screen.lowercased() {
-        case "mouse":
-            let p = NSEvent.mouseLocation
-            return NSScreen.screens.first { NSMouseInRect(p, $0.frame, false) } ?? NSScreen.screens[0]
-        case "main":
-            return NSScreen.screens[0]
-        default:
-            return NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.screens[0]
-        }
-    }
+    private func targetScreen() -> NSScreen { NotchMetrics.targetScreen(config) }
 
     private var ear: CGFloat { CGFloat(max(0, config.earRadius)) }
 
@@ -392,13 +394,17 @@ final class NotchController: NSObject {
                                height: bodyH - headerH - pad * 0.75 - 6)
         for s in sessions { s.view.frame = terminalFrame }
 
-        // Header: schede a sinistra del notch, "+" a destra.
+        // Header: schede a sinistra del notch; a destra il mini-player e, in fondo, il "+".
         let leftEdge = ear + pad
         let notchLeft = w / 2 - metrics.width / 2 - 10
+        let notchRight = w / 2 + metrics.width / 2 + 12
+        let rightEdge = w - ear - pad
         tabBar.frame = NSRect(x: leftEdge, y: bodyH - headerH, width: max(0, notchLeft - leftEdge), height: headerH)
-        newTabButton.frame = NSRect(x: w / 2 + metrics.width / 2 + 10, y: bodyH - headerH + (headerH - 20) / 2,
-                                    width: 20, height: 20)
+        newTabButton.frame = NSRect(x: rightEdge - 20, y: bodyH - headerH + (headerH - 20) / 2, width: 20, height: 20)
+        mediaView.frame = NSRect(x: notchRight, y: bodyH - headerH,
+                                 width: max(0, newTabButton.frame.minX - 10 - notchRight), height: headerH)
         refreshTabBar()
+        refreshMedia()
     }
 
     private func expandedPath() -> CGPath {
@@ -418,10 +424,28 @@ final class NotchController: NSObject {
 
     func toggle() { isOpen ? close() : open() }
 
-    private var fadingViews: [NSView] { [current.view, tabBar, newTabButton] }
+    private var fadingViews: [NSView] { [current.view, tabBar, newTabButton, mediaView] }
+
+    // MARK: - Musica
+
+    func updateMedia(track: NowPlayingTrack?, artwork: NSImage?) {
+        mediaTrack = track
+        mediaArtwork = artwork
+        refreshMedia()
+    }
+
+    private func refreshMedia() {
+        guard let track = mediaTrack, config.media.enabled, config.media.showInHeader, config.showHeader else {
+            mediaView.isHidden = true
+            return
+        }
+        mediaView.isHidden = false
+        mediaView.update(track: track, artwork: mediaArtwork, tint: foreground)
+    }
 
     func open() {
         guard !isOpen else { return }
+        onWillOpen?()
         isOpen = true
         let reopeningMidClose = panel.isVisible
         if !reopeningMidClose { layoutForCurrentScreen() }
@@ -476,35 +500,8 @@ final class NotchController: NSObject {
     }
 
     private func animateMask(from: CGPath, to: CGPath, opening: Bool, completion: (() -> Void)?) {
-        for l in shapeLayers { l.removeAllAnimations() }
-        let a = config.animation
-        CATransaction.begin()
-        CATransaction.setCompletionBlock(completion)
-        CATransaction.setDisableActions(true)
-        for l in shapeLayers { l.path = to }
-
-        if a.style.lowercased() != "none" && a.duration > 0 {
-            let anim: CABasicAnimation
-            if opening && a.style.lowercased() == "spring" {
-                let s = CASpringAnimation(keyPath: "path")
-                let omega = 2 * Double.pi / max(0.05, a.duration)
-                s.mass = 1
-                s.stiffness = omega * omega
-                s.damping = 2 * max(0.1, min(1.0, a.damping)) * omega
-                s.duration = s.settlingDuration
-                anim = s
-            } else {
-                anim = CABasicAnimation(keyPath: "path")
-                anim.duration = opening ? a.duration : a.duration * 0.6
-                anim.timingFunction = opening
-                    ? CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
-                    : CAMediaTimingFunction(controlPoints: 0.5, 0, 0.75, 0)
-            }
-            anim.fromValue = from
-            anim.toValue = to
-            for l in shapeLayers { l.add(anim, forKey: "path") }
-        }
-        CATransaction.commit()
+        ShapeAnimator.animate(shapeLayers, from: from, to: to, opening: opening,
+                              animation: config.animation, completion: completion)
     }
 
     @objc private func panelResignedKey() {

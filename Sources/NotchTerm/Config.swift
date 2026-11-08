@@ -18,6 +18,17 @@ struct Config: Codable, Equatable {
         var damping: Double = 0.82
     }
 
+    /// Controllo di Spotify / Apple Music.
+    struct Media: Codable, Equatable {
+        var enabled: Bool = true
+        /// Mini-player a destra del notch quando il terminale è aperto.
+        var showInHeader: Bool = true
+        /// Il notch si allarga per qualche secondo quando cambia brano.
+        var peekOnTrackChange: Bool = true
+        /// Secondi di permanenza dell'avviso.
+        var peekDuration: Double = 4
+    }
+
     /// Colori che sovrascrivono quelli del tema. Formato "#RRGGBB".
     struct Colors: Codable, Equatable {
         var background: String?
@@ -69,6 +80,7 @@ struct Config: Codable, Equatable {
     var restartShellOnExit: Bool = true
 
     var animation: Animation = Animation()
+    var media: Media = Media()
     /// Chiude il pannello quando si clicca altrove.
     var hideOnFocusLoss: Bool = true
     /// Su quale schermo aprire: "notch" (quello col notch, se c'è), "main", "mouse".

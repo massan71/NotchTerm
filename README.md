@@ -40,6 +40,20 @@ I temi `glass` e `glass-clear` usano il materiale Liquid Glass di macOS 26+ (`NS
 si vede attraverso il pannello, sfocato, con un bordo luminoso. Sulle versioni precedenti si ripiega su una
 sfocatura classica. Il materiale si può usare anche con gli altri temi: `"material": "glass"`.
 
+## Spotify e Apple Music
+
+NotchTerm segue il brano in riproduzione su Spotify o Apple Music:
+
+- **Mini-player** a destra del notch quando il terminale è aperto: copertina, titolo, artista e ⏮ ⏯ ⏭.
+  Clic sul titolo per aprire il lettore.
+- **Avviso al cambio brano**: a terminale chiuso il notch si allarga per qualche secondo con copertina e
+  comandi, come la Dynamic Island. Con il mouse sopra resta aperto.
+
+Il brano lo si legge dalle notifiche che i lettori già pubblicano, senza permessi. Per comandare la
+riproduzione macOS chiede una volta il permesso di **Automazione**. NotchTerm non avvia mai il lettore.
+Le copertine di Spotify arrivano dal servizio oEmbed pubblico di Spotify.
+Tutto si regola in Impostazioni → Musica.
+
 ## Personalizzazione
 
 Il file di configurazione è `~/.config/notchterm/config.json` (si apre dal menu, o con ⌘, dentro il terminale).
@@ -70,6 +84,7 @@ Si ricarica **da solo al salvataggio**. Basta scrivere le chiavi da cambiare, pe
 | `optionAsMeta` | `true` | Option come Meta (readline/emacs) |
 | `newTabInheritsDirectory` | `true` | Le nuove schede si aprono nella cartella della scheda corrente |
 | `maxTabWidth` | `170` | Larghezza massima di una linguetta |
+| `media` | `{"enabled": true, "showInHeader": true, "peekOnTrackChange": true, "peekDuration": 4}` | Spotify / Apple Music |
 | `fallbackNotchWidth` | `190` | Larghezza del notch simulato sugli schermi senza notch |
 
 Esempio:
@@ -113,7 +128,7 @@ Quando la shell di una scheda termina (`exit`) la scheda si chiude; se era l'ult
 osascript -l JavaScript -e 'ObjC.import("Foundation"); $.NSDistributedNotificationCenter.defaultCenter.postNotificationNameObjectUserInfoDeliverImmediately("net.sangalli.notchterm.toggle", $(), $(), true)'
 ```
 
-Sostituisci `toggle` con `newtab` per una nuova scheda o con `settings` per le impostazioni. Utile per Raycast, Comandi Rapidi o skhd.
+Sostituisci `toggle` con `newtab` per una nuova scheda, `settings` per le impostazioni o `peek` per mostrare l'avviso del brano. Utile per Raycast, Comandi Rapidi o skhd.
 
 ## Struttura
 
@@ -123,6 +138,8 @@ Sostituisci `toggle` con `newtab` per una nuova scheda o con `settings` per le i
 - `Sources/NotchTerm/TabBar.swift` — linguette nell'header
 - `Sources/NotchTerm/Config.swift` — configurazione JSON e ricarica automatica
 - `Sources/NotchTerm/Themes.swift` — temi inclusi e materiale di sfondo
+- `Sources/NotchTerm/NowPlaying.swift` — Spotify / Apple Music: stato, comandi, copertine
+- `Sources/NotchTerm/MediaViews.swift` — mini-player e avviso al cambio brano
 - `Sources/NotchTerm/Settings.swift` — finestra Impostazioni (SwiftUI)
 - `Sources/NotchTerm/HotKey.swift` — scorciatoia globale (Carbon, nessun permesso richiesto)
 - `Sources/NotchTerm/main.swift` — app e menu nella barra

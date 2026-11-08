@@ -12,5 +12,6 @@
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>NotchTerm usa Spotify e Musica per mostrare il brano in riproduzione e comandare play, pausa e cambio brano.</string>
 </dict>
 </plist>
