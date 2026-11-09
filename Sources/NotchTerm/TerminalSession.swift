@@ -11,9 +11,13 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     var onChange: ((TerminalSession) -> Void)?
     var onExit: ((TerminalSession) -> Void)?
     var onCommandFinished: ((TerminalSession, CommandResult) -> Void)?
+    /// Un comando è partito o è finito.
+    var onActivityChange: ((TerminalSession) -> Void)?
 
     /// Comando in esecuzione (dagli hook della shell), se c'è.
     private(set) var runningCommand: String?
+    /// Da quando è in esecuzione.
+    private(set) var runningSince: Date?
     /// Esito non ancora visto (scheda in secondo piano): "✓" o "✗".
     var badge: String?
 
@@ -35,7 +39,12 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         env.append("COLORTERM=truecolor")
         if !env.contains(where: { $0.hasPrefix("LANG=") }) { env.append("LANG=en_US.UTF-8") }
         for (k, v) in config.env { env.append("\(k)=\(v)") }
-        if config.shellIntegration { env += ShellIntegration.environment(forShell: shell) }
+        var args = config.shellArgs
+        if config.shellIntegration {
+            let launch = ShellIntegration.prepare(shell: shell, args: args)
+            args = launch.args
+            env += launch.env
+        }
 
         var dir = directory ?? (config.workingDirectory as NSString).expandingTildeInPath
         var isDir: ObjCBool = false
@@ -44,7 +53,12 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         }
         cwd = dir
         shellTitle = ""
-        view.startProcess(executable: shell, args: config.shellArgs, environment: env,
+        if runningCommand != nil {
+            runningCommand = nil
+            runningSince = nil
+            onActivityChange?(self)
+        }
+        view.startProcess(executable: shell, args: args, environment: env,
                           execName: nil, currentDirectory: dir)
         onChange?(self)
     }
@@ -85,7 +99,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     /// Titolo breve senza il segno ✓/✗.
-    var plainShortTitle: String {
+    var plainShortTitle: String { Self.tabTitle(shellTitle: shellTitle, displayTitle: displayTitle) }
+
+    static func tabTitle(shellTitle: String, displayTitle: String) -> String {
         if !shellTitle.isEmpty {
             // "utente@host:~/progetti/app" → "app"
             if shellTitle.contains("@"), let colon = shellTitle.lastIndex(of: ":") {
@@ -95,8 +111,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             }
             return shellTitle
         }
-        let t = displayTitle
-        return t == "~" ? t : ((t as NSString).lastPathComponent)
+        return displayTitle == "~" ? displayTitle : ((displayTitle as NSString).lastPathComponent)
     }
 
     // MARK: LocalProcessTerminalViewDelegate
@@ -120,14 +135,16 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         switch r.state {
         case .working:
             runningCommand = r.title ?? ""
+            runningSince = Date()
+            onActivityChange?(self)
         case .done, .error:
             // Si avvisa solo nel passaggio da "in esecuzione" a "terminato".
             guard runningCommand != nil else { return }
             runningCommand = nil
-            let parts = (r.message ?? "").split(separator: " ")
-            let code = parts.first.flatMap { Int($0) } ?? (r.state == .error ? 1 : 0)
-            let duration = parts.count > 1 ? (Double(parts[1]) ?? 0) : 0
+            runningSince = nil
+            let (code, duration) = CommandResult.parse(message: r.message ?? "", failed: r.state == .error)
             onCommandFinished?(self, CommandResult(command: r.title ?? "", exitCode: code, duration: duration))
+            onActivityChange?(self)
         default:
             break
         }

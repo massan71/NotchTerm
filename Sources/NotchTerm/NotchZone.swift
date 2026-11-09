@@ -133,4 +133,10 @@ final class NotchZoneController {
     }
 
     var clickToOpen: Bool { config.notchZone.clickToOpen }
+
+    /// Torna sopra agli altri pannelli del notch (es. l'indicatore dei comandi),
+    /// così passaggio del mouse e clic sul notch continuano a funzionare.
+    func raise() {
+        if panel.isVisible { panel.orderFrontRegardless() }
+    }
 }

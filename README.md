@@ -29,6 +29,8 @@ make install    # copia in /Applications e avvia
 ```
 
 `build.sh` produce un'app universale (Apple Silicon + Intel); `ARCH=arm64 ./build.sh` compila solo una architettura.
+`swift test` esegue i test (config, scorciatoie, forma del notch, schede e gli script di integrazione
+con zsh, bash e fish avviati davvero); la CI li esegue a ogni push.
 
 L'app vive nella barra dei menu (icona terminale) e non ha icona nel Dock.
 Scorciatoia predefinita: **⌃`** (Control + backtick).
@@ -47,7 +49,7 @@ Funziona anche trascinando direttamente sul terminale aperto. Si regola in Impos
 o con `notchZone` nel config. Sugli schermi senza notch la zona è al centro della barra dei menu.
 
 **⌘clic** su un link o un percorso nel terminale lo apre (browser, Finder o l'app predefinita); con
-l'integrazione zsh i percorsi relativi partono dalla cartella della shell.
+l'integrazione con la shell i percorsi relativi partono dalla cartella della shell.
 
 ## Impostazioni
 
@@ -62,18 +64,29 @@ I temi `glass` e `glass-clear` usano il materiale Liquid Glass di macOS 26+ (`NS
 si vede attraverso il pannello, sfocato, con un bordo luminoso. Sulle versioni precedenti si ripiega su una
 sfocatura classica. Il materiale si può usare anche con gli altri temi: `"material": "glass"`.
 
-## Avviso a fine comando
+## Comandi in corso e avviso a fine comando
 
-Lanci una build lunga e chiudi il terminale: quando finisce, il notch si allarga con il comando, l'esito
-(✓ o ✗ con il codice d'uscita) e la durata. Un clic sull'avviso riapre il terminale su quella scheda.
-Se il terminale è aperto su un'altra scheda, quella scheda mostra ✓ o ✗ nel titolo.
+Lanci una build lunga e chiudi il terminale: dopo qualche secondo il notch si allarga appena ai lati e mostra
+il tempo trascorso e un anello che gira (con più comandi in corso, anche quanti sono). Un clic lo riapre sulla
+scheda del comando. Quando finisce, il notch si allarga con il comando, l'esito (✓ o ✗ con il codice d'uscita)
+e la durata; un clic sull'avviso riapre il terminale su quella scheda. Se il terminale è aperto su un'altra
+scheda, quella scheda mostra ✓ o ✗ nel titolo.
 
-Per default l'avviso compare per i comandi che durano almeno 10 secondi; si regola in Impostazioni → Shell
-o con `commandNotify` nel config.
+Per default l'indicatore compare dopo 3 secondi e l'avviso per i comandi che durano almeno 10 secondi; si
+regola in Impostazioni → Shell o con `commandNotify` nel config. Editor, pager, `ssh`, `tmux` e simili sono
+esclusi: l'elenco è `commandNotify.ignore`.
 
-Funziona con **zsh** (la shell predefinita di macOS) grazie a una piccola integrazione che NotchTerm attiva
-da solo: zsh parte con `ZDOTDIR` puntato a `~/Library/Application Support/NotchTerm/shell-integration/zsh`,
-il cui `.zshenv` ripristina subito il tuo `ZDOTDIR`, carica i tuoi file di avvio come sempre e aggiunge due hook.
+Funziona con **zsh**, **bash** (anche il bash 3.2 di macOS) e **fish** grazie a una piccola integrazione che
+NotchTerm attiva da solo, senza toccare i tuoi file. Gli script stanno in
+`~/Library/Application Support/NotchTerm/shell-integration`:
+
+- **zsh** parte con `ZDOTDIR` puntato alla cartella di NotchTerm, il cui `.zshenv` ripristina subito il tuo
+  `ZDOTDIR`, carica i tuoi file di avvio come sempre e aggiunge gli hook.
+- **bash** parte con `--rcfile` su uno script che carica prima i tuoi file (`.bash_profile`/`.profile` per le
+  shell di login, altrimenti `.bashrc`) e poi aggiunge gli hook a `PROMPT_COMMAND` e alla trap `DEBUG` (se
+  usi già una trap `DEBUG`, per esempio bash-preexec, resta la tua e l'inizio del comando non viene segnalato).
+- **fish** trova lo script in `XDG_DATA_DIRS` (`fish/vendor_conf.d`); lo script poi ripristina la variabile.
+
 Si disattiva con `"shellIntegration": false`.
 
 Con altre shell basta emettere a fine comando la sequenza
@@ -126,8 +139,9 @@ Si ricarica **da solo al salvataggio**. Basta scrivere le chiavi da cambiare, pe
 | `maxTabWidth` | `170` | Larghezza massima di una linguetta |
 | `media` | `{"enabled": true, "showInHeader": true, "peekOnTrackChange": true, "peekDuration": 4}` | Spotify / Apple Music |
 | `notchZone` | `{"hoverToOpen": true, "hoverDelay": 0.3, "clickToOpen": true, "dropFiles": true}` | Il notch a terminale chiuso |
-| `commandNotify` | `{"enabled": true, "minDuration": 10, "notifyOnSuccess": true}` | Avviso a fine comando |
-| `shellIntegration` | `true` | Integrazione zsh (serve all'avviso a fine comando) |
+| `commandNotify` | `{"enabled": true, "minDuration": 10, "notifyOnSuccess": true, "liveIndicator": true, "liveIndicatorDelay": 3, "ignore": ["vim", "less", "ssh", …]}` | Indicatore dei comandi in corso e avviso a fine comando |
+| `shellIntegration` | `true` | Integrazione zsh, bash e fish (serve a indicatore, avviso e cartella corrente) |
+| `restoreTabs` | `true` | All'avvio riapre le schede nelle loro cartelle |
 | `fallbackNotchWidth` | `190` | Larghezza del notch simulato sugli schermi senza notch |
 
 Esempio:
@@ -161,6 +175,10 @@ Clic per selezionare, × o clic centrale per chiudere.
 
 Quando la shell di una scheda termina (`exit`) la scheda si chiude; se era l'ultima, la shell riparte.
 
+All'avvio NotchTerm riapre le schede della volta precedente, ognuna nella sua cartella (salvate in
+`~/Library/Application Support/NotchTerm/tabs.json`; le cartelle sparite si saltano). Si disattiva con
+`"restoreTabs": false` o da Impostazioni → Generale.
+
 ## Altre scorciatoie dentro il terminale
 
 ⌘F cerca nello storico (⌘G / ⌘⇧G successivo / precedente, Esc chiude) · ⌘C copia · ⌘V incolla · ⌘A seleziona tutto · ⌘K pulisci · ⌘+ / ⌘− / ⌘0 dimensione testo · ⌘, impostazioni
@@ -181,13 +199,16 @@ Sostituisci `toggle` con `newtab` per una nuova scheda, `settings` per le impost
 - `Sources/NotchTerm/TabBar.swift` — linguette nell'header
 - `Sources/NotchTerm/Config.swift` — configurazione JSON e ricarica automatica
 - `Sources/NotchTerm/Themes.swift` — temi inclusi e materiale di sfondo
-- `Sources/NotchTerm/ShellIntegration.swift` — hook zsh: inizio/fine comando e cartella corrente
+- `Sources/NotchTerm/ShellIntegration.swift` — hook zsh, bash e fish: inizio/fine comando e cartella corrente
+- `Sources/NotchTerm/ActivityIndicator.swift` — indicatore nel notch dei comandi in corso
+- `Sources/NotchTerm/TabStore.swift` — schede salvate e ripristinate all'avvio
 - `Sources/NotchTerm/NotchZone.swift` — il notch a terminale chiuso: mouse, clic, file trascinati
 - `Sources/NotchTerm/NowPlaying.swift` — Spotify / Apple Music: stato, comandi, copertine
 - `Sources/NotchTerm/MediaViews.swift` — mini-player e avvisi dal notch (brano, fine comando)
 - `Sources/NotchTerm/Settings.swift` — finestra Impostazioni (SwiftUI)
 - `Sources/NotchTerm/HotKey.swift` — scorciatoia globale (Carbon, nessun permesso richiesto)
 - `Sources/NotchTerm/main.swift` — app e menu nella barra
+- `Tests/NotchTermTests` — test (`swift test`)
 
 ## Release
 

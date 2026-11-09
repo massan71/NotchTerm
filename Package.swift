@@ -13,6 +13,11 @@ let package = Package(
             dependencies: ["SwiftTerm"],
             path: "Sources/NotchTerm"
         ),
+        .testTarget(
+            name: "NotchTermTests",
+            dependencies: ["NotchTerm"],
+            path: "Tests/NotchTermTests"
+        ),
     ],
     swiftLanguageVersions: [.v5]
 )

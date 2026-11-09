@@ -173,10 +173,13 @@ final class NotchController: NSObject {
     /// Un comando lungo è terminato mentre il pannello era chiuso.
     /// Parametri: esito, titolo della scheda (se più di una), azione per mostrarla.
     var onCommandNotify: ((CommandResult, String?, @escaping () -> Void) -> Void)?
+    /// Un comando è partito o finito in una scheda (per l'indicatore nel notch).
+    var onActivityChange: (() -> Void)?
+    private var pendingSave: DispatchWorkItem?
 
     var tabCount: Int { sessions.count }
 
-    init(config: Config) {
+    init(config: Config, restoring saved: SavedTabs? = nil) {
         self.config = config
         panel = NotchPanel(contentRect: NSRect(x: 0, y: 0, width: 600, height: 300),
                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -216,7 +219,12 @@ final class NotchController: NSObject {
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
         applyAppearance()
-        newTab(directory: nil)
+        if let saved, config.restoreTabs {
+            for dir in saved.directories { newTab(directory: dir) }
+            selectTab(saved.selected)
+        } else {
+            newTab(directory: nil)
+        }
     }
 
     // MARK: - Config
@@ -305,6 +313,7 @@ final class NotchController: NSObject {
         s.onChange = { [weak self] _ in self?.refreshTabBar() }
         s.onExit = { [weak self] in self?.sessionExited($0) }
         s.onCommandFinished = { [weak self] in self?.commandFinished($0, $1) }
+        s.onActivityChange = { [weak self] _ in self?.onActivityChange?() }
         root.addSubview(s.view)
         root.bringBorderToFront()
         let insertAt = sessions.isEmpty ? 0 : selectedIndex + 1
@@ -334,10 +343,12 @@ final class NotchController: NSObject {
         let s = sessions.remove(at: index)
         s.onExit = nil
         s.onChange = nil
+        s.onActivityChange = nil
         s.terminate()
         s.view.removeFromSuperview()
         if selectedIndex >= sessions.count || index < selectedIndex { selectedIndex = max(0, selectedIndex - 1) }
         selectTab(selectedIndex)
+        if s.runningCommand != nil { onActivityChange?() }
     }
 
     private func cycleTab(_ delta: Int) {
@@ -383,12 +394,62 @@ final class NotchController: NSObject {
         return String(path.flatMap { special.contains($0) ? ["\\", $0] : [$0] })
     }
 
+    // MARK: - Comandi in corso
+
+    private func isIgnored(_ command: String) -> Bool {
+        CommandResult.isIgnored(command, list: config.commandNotify.ignore)
+    }
+
+    /// Il comando in esecuzione da più tempo (esclusi i programmi interattivi).
+    /// `tab` è il titolo della scheda se ce n'è più di una; `count` quanti comandi girano.
+    var activity: (command: String, since: Date, tab: String?, count: Int)? {
+        let running = sessions.filter { s in
+            guard let cmd = s.runningCommand, s.runningSince != nil else { return false }
+            return !isIgnored(cmd)
+        }
+        guard let oldest = running.min(by: { $0.runningSince! < $1.runningSince! }) else { return nil }
+        return (oldest.runningCommand ?? "", oldest.runningSince!,
+                sessions.count > 1 ? oldest.plainShortTitle : nil, running.count)
+    }
+
+    /// Apre il terminale sulla scheda del comando in corso da più tempo.
+    func openRunningTab() {
+        let running = sessions.enumerated().filter { $0.element.runningSince != nil && !isIgnored($0.element.runningCommand ?? "") }
+        if let oldest = running.min(by: { $0.element.runningSince! < $1.element.runningSince! }) {
+            selectTab(oldest.offset)
+        }
+        open()
+    }
+
+    // MARK: - Schede salvate
+
+    /// Stato attuale delle schede, con le cartelle lette dal kernel.
+    func savedTabs() -> SavedTabs {
+        for s in sessions { s.refreshDirectory() }
+        return SavedTabs(directories: sessions.map(\.cwd), selected: selectedIndex)
+    }
+
+    func saveTabs() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        guard config.restoreTabs else { return }
+        TabStore.save(savedTabs())
+    }
+
+    private func scheduleSave() {
+        guard config.restoreTabs else { return }
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.saveTabs() } }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
     // MARK: - Fine comando
 
     private func commandFinished(_ s: TerminalSession, _ result: CommandResult) {
         let cfg = config.commandNotify
         guard cfg.enabled, result.duration >= cfg.minDuration,
-              cfg.notifyOnSuccess || !result.succeeded,
+              cfg.notifyOnSuccess || !result.succeeded, !isIgnored(result.command),
               let index = sessions.firstIndex(where: { $0 === s }) else { return }
         // Già sotto gli occhi dell'utente: niente avviso.
         if isOpen && index == selectedIndex { return }
@@ -440,6 +501,7 @@ final class NotchController: NSObject {
         tabBar.update(titles: titles, selected: selectedIndex, tint: foreground)
         tabBar.isHidden = !config.showHeader
         newTabButton.isHidden = !config.showHeader
+        scheduleSave()
     }
 
     // MARK: - Geometria

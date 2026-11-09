@@ -230,6 +230,7 @@ private struct GeneralTab: View {
                 Toggle("Nascondi quando clicchi altrove", isOn: $model.config.hideOnFocusLoss)
                 Toggle("Mostra titolo e schede accanto al notch", isOn: $model.config.showHeader)
                 Toggle("Le nuove schede si aprono nella cartella corrente", isOn: $model.config.newTabInheritsDirectory)
+                Toggle("Riapri le schede all'avvio", isOn: $model.config.restoreTabs)
                 Toggle("Avvia al login", isOn: Binding(get: { model.launchAtLogin },
                                                        set: { model.setLaunchAtLogin($0) }))
             }
@@ -382,11 +383,15 @@ private struct ShellTab: View {
                     .disabled(!model.config.commandNotify.enabled)
                 Toggle("Avvisa anche quando va a buon fine", isOn: $model.config.commandNotify.notifyOnSuccess)
                     .disabled(!model.config.commandNotify.enabled)
-                Toggle("Integrazione con la shell (zsh)", isOn: $model.config.shellIntegration)
+                Toggle("Mostra nel notch i comandi in corso", isOn: $model.config.commandNotify.liveIndicator)
+                LabeledSlider(title: "Compare dopo", value: $model.config.commandNotify.liveIndicatorDelay, range: 0...30,
+                              format: { v in CommandResult.format(v) })
+                    .disabled(!model.config.commandNotify.liveIndicator)
+                Toggle("Integrazione con la shell (zsh, bash, fish)", isOn: $model.config.shellIntegration)
             } header: {
-                Text("Fine comando")
+                Text("Comandi")
             } footer: {
-                Text("L'avviso compare quando il terminale è chiuso; se è aperto su un'altra scheda, la scheda mostra ✓ o ✗. Richiede zsh con l'integrazione attiva: vale per le schede aperte da quel momento.")
+                Text("A terminale chiuso il notch mostra il tempo trascorso finché il comando gira, poi l'esito; se il terminale è aperto su un'altra scheda, la scheda mostra ✓ o ✗. Editor, pager e ssh sono esclusi (\"commandNotify.ignore\" in config.json). Serve l'integrazione con la shell: vale per le schede aperte da quel momento.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

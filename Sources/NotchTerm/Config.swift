@@ -48,6 +48,14 @@ struct Config: Codable, Equatable {
         var minDuration: Double = 10
         /// Avvisa anche quando il comando va a buon fine (non solo in caso di errore).
         var notifyOnSuccess: Bool = true
+        /// A terminale chiuso il notch mostra un indicatore finché il comando è in corso.
+        var liveIndicator: Bool = true
+        /// Secondi di esecuzione dopo cui compare l'indicatore.
+        var liveIndicatorDelay: Double = 3
+        /// Programmi interattivi da ignorare (né indicatore né avviso), confrontati
+        /// con il primo comando della riga.
+        var ignore: [String] = ["vim", "nvim", "vi", "nano", "emacs", "micro", "hx", "less", "more", "man",
+                                "top", "htop", "btop", "ssh", "mosh", "tmux", "screen", "watch", "claude"]
     }
 
     /// Colori che sovrascrivono quelli del tema. Formato "#RRGGBB".
@@ -104,8 +112,11 @@ struct Config: Codable, Equatable {
     var media: Media = Media()
     var commandNotify: CommandNotify = CommandNotify()
     var notchZone: NotchZone = NotchZone()
-    /// Integrazione zsh: serve all'avviso a fine comando.
+    /// Integrazione con zsh, bash e fish: serve all'avviso a fine comando,
+    /// all'indicatore nel notch e alla cartella corrente delle schede.
     var shellIntegration: Bool = true
+    /// Alla riapertura di NotchTerm ricrea le schede nelle loro cartelle.
+    var restoreTabs: Bool = true
     /// Chiude il pannello quando si clicca altrove.
     var hideOnFocusLoss: Bool = true
     /// Su quale schermo aprire: "notch" (quello col notch, se c'è), "main", "mouse".
@@ -137,6 +148,11 @@ enum ConfigStore {
     static func load() -> (Config, String?) {
         ensureFileExists()
         guard let data = try? Data(contentsOf: fileURL) else { return (Config(), nil) }
+        return decode(data)
+    }
+
+    /// Fonde il JSON dell'utente sopra ai default.
+    static func decode(_ data: Data) -> (Config, String?) {
         do {
             let user = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
             guard let userDict = user as? [String: Any] else {

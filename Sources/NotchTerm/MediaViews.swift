@@ -163,7 +163,11 @@ final class PeekController {
 
     private var metrics = NotchMetrics(width: 190, height: 32, hasHardwareNotch: false)
     private var hideTimer: Timer?
-    private(set) var isShowing = false
+    private(set) var isShowing = false {
+        didSet { if isShowing != oldValue { onVisibilityChange?() } }
+    }
+    /// L'avviso è comparso o sparito (l'indicatore dei comandi si fa da parte).
+    var onVisibilityChange: (() -> Void)?
     private enum Mode { case media, command }
     private var mode = Mode.media
     private var onContentClick: (() -> Void)?

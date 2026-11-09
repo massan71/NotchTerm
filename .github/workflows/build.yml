@@ -29,6 +29,9 @@ jobs:
           path: .build
           key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
 
+      - name: Test
+        run: swift test
+
       - name: Compila l'app universale
         run: ./build.sh
 

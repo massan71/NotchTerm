@@ -11,14 +11,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let nowPlaying = NowPlayingMonitor()
     private var peek: PeekController!
     private var zone: NotchZoneController!
+    private var activity: ActivityIndicatorController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let (config, error) = ConfigStore.load()
         lastError = error
-        controller = NotchController(config: config)
+        controller = NotchController(config: config, restoring: TabStore.load())
         controller.onOpenConfig = { [weak self] in self?.showSettings() }
         setUpMedia(config)
         setUpZone(config)
+        setUpActivity(config)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "NotchTerm")
@@ -106,6 +108,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.onDidClose = { [weak self] in self?.zone.setSuspended(false) }
     }
 
+    private func setUpActivity(_ config: Config) {
+        activity = ActivityIndicatorController(config: config)
+        activity.onClick = { [weak self] in self?.controller.openRunningTab() }
+        controller.onActivityChange = { [weak self] in self?.refreshActivity() }
+        peek.onVisibilityChange = { [weak self] in self?.refreshActivity() }
+        let previousWillOpen = controller.onWillOpen
+        controller.onWillOpen = { [weak self] in
+            previousWillOpen?()
+            self?.refreshActivity(opening: true)
+        }
+        let previousDidClose = controller.onDidClose
+        controller.onDidClose = { [weak self] in
+            previousDidClose?()
+            self?.refreshActivity()
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.activity.refreshLayout() }
+        }
+    }
+
+    /// L'indicatore dei comandi lascia il posto al terminale aperto e agli altri avvisi.
+    private func refreshActivity(opening: Bool = false) {
+        activity.update(activity: controller.activity,
+                        suppressed: opening || controller.isOpen || peek.isShowing)
+        zone.raise()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        controller.saveTabs()
+    }
+
     func showPeekPreview() {
         let sample = NowPlayingTrack(source: .spotify, id: "preview", title: "Brano di esempio",
                                      artist: "NotchTerm", album: "", isPlaying: true)
@@ -133,6 +167,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.update(config: config)
         peek.config = config
         zone.update(config: config)
+        activity.config = config
+        activity.refreshLayout()
+        refreshActivity()
         nowPlaying.enabled = config.media.enabled
         settings?.model.externalUpdate(config)
         if hotkeyChanged { registerHotKey() }
