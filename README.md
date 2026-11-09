@@ -5,7 +5,13 @@ si allarga in un terminale vero; premila di nuovo e rientra.
 
 ## Installare
 
-Scarica `NotchTerm-x.y.z.zip` dalle [Release](https://github.com/massan71/NotchTerm/releases), estrai e sposta
+Con [Homebrew](https://brew.sh):
+
+```bash
+brew install --cask massan71/notchterm/notchterm
+```
+
+Oppure scarica `NotchTerm-x.y.z.zip` dalle [Release](https://github.com/massan71/NotchTerm/releases), estrai e sposta
 `NotchTerm.app` in Applicazioni. L'app non è notarizzata: la prima volta macOS la blocca. Apri
 Impostazioni di Sistema → Privacy e sicurezza → "Apri comunque", oppure da Terminale:
 
@@ -164,6 +170,19 @@ Sostituisci `toggle` con `newtab` per una nuova scheda, `settings` per le impost
 - `Sources/NotchTerm/Settings.swift` — finestra Impostazioni (SwiftUI)
 - `Sources/NotchTerm/HotKey.swift` — scorciatoia globale (Carbon, nessun permesso richiesto)
 - `Sources/NotchTerm/main.swift` — app e menu nella barra
+
+## Release
+
+La CI (GitHub Actions, `.github/workflows/build.yml`) compila l'app universale a ogni push e allega lo zip
+come artefatto. Per pubblicare una versione:
+
+1. aggiorna `CFBundleShortVersionString` e `CFBundleVersion` in `Resources/Info.plist`;
+2. fai commit e crea il tag corrispondente, es. `git tag -a v0.4.0 -m "NotchTerm 0.4.0"`;
+3. `git push origin main v0.4.0`.
+
+La CI controlla che il tag corrisponda alla versione, crea la release con zip e checksum e, se è impostato il
+secret `TAP_TOKEN`, aggiorna il cask in [homebrew-notchterm](https://github.com/massan71/homebrew-notchterm).
+In alternativa il cask si aggiorna a mano con `scripts/update-cask.sh <versione> <sha256>`.
 
 ## Requisiti
 

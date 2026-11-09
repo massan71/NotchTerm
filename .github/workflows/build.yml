@@ -1,0 +1,71 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Serve l'SDK di macOS 26 per Liquid Glass (NSGlassEffectView).
+    runs-on: macos-26
+    env:
+      # Token opzionale con accesso in scrittura a massan71/homebrew-notchterm.
+      TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Compila l'app universale
+        run: ./build.sh
+
+      - name: Crea lo zip
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
+          mkdir -p dist
+          ditto -c -k --keepParent build/NotchTerm.app "dist/NotchTerm-$VERSION.zip"
+          (cd dist && shasum -a 256 "NotchTerm-$VERSION.zip" > "NotchTerm-$VERSION.zip.sha256")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "SHA256=$(cut -d' ' -f1 dist/*.sha256)" >> "$GITHUB_ENV"
+          lipo -archs build/NotchTerm.app/Contents/MacOS/NotchTerm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NotchTerm-${{ env.VERSION }}
+          path: dist/*
+
+      - name: Il tag corrisponde alla versione?
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
+            echo "::error::Il tag $GITHUB_REF_NAME non corrisponde alla versione $VERSION in Info.plist"
+            exit 1
+          fi
+
+      - name: Pubblica la release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "NotchTerm $VERSION" --generate-notes
+          fi
+
+      - name: Aggiorna il cask Homebrew
+        if: startsWith(github.ref, 'refs/tags/v') && env.TAP_TOKEN != ''
+        run: ./scripts/update-cask.sh "$VERSION" "$SHA256"
