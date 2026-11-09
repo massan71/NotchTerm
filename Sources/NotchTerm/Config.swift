@@ -29,6 +29,18 @@ struct Config: Codable, Equatable {
         var peekDuration: Double = 4
     }
 
+    /// Il notch quando il terminale è chiuso.
+    struct NotchZone: Codable, Equatable {
+        /// Apre il terminale lasciando il mouse sul notch.
+        var hoverToOpen: Bool = true
+        /// Secondi di attesa prima dell'apertura al passaggio del mouse.
+        var hoverDelay: Double = 0.3
+        /// Apre il terminale con un clic sul notch.
+        var clickToOpen: Bool = true
+        /// Trascinando file sul notch il terminale si apre per riceverli.
+        var dropFiles: Bool = true
+    }
+
     /// Avviso dal notch quando termina un comando lungo.
     struct CommandNotify: Codable, Equatable {
         var enabled: Bool = true
@@ -91,6 +103,7 @@ struct Config: Codable, Equatable {
     var animation: Animation = Animation()
     var media: Media = Media()
     var commandNotify: CommandNotify = CommandNotify()
+    var notchZone: NotchZone = NotchZone()
     /// Integrazione zsh: serve all'avviso a fine comando.
     var shellIntegration: Bool = true
     /// Chiude il pannello quando si clicca altrove.

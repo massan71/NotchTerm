@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settings: SettingsWindowController?
     private let nowPlaying = NowPlayingMonitor()
     private var peek: PeekController!
+    private var zone: NotchZoneController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let (config, error) = ConfigStore.load()
@@ -17,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller = NotchController(config: config)
         controller.onOpenConfig = { [weak self] in self?.showSettings() }
         setUpMedia(config)
+        setUpZone(config)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "NotchTerm")
@@ -87,6 +89,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func setUpZone(_ config: Config) {
+        zone = NotchZoneController(config: config)
+        zone.view.onHover = { [weak self] in self?.controller.open() }
+        zone.view.onClick = { [weak self] in
+            guard let self, self.zone.clickToOpen else { return }
+            self.controller.open()
+        }
+        zone.view.onDragEnter = { [weak self] in self?.controller.open() }
+        // Il pannello copre il notch quando è aperto: la zona si sospende.
+        let previousWillOpen = controller.onWillOpen
+        controller.onWillOpen = { [weak self] in
+            previousWillOpen?()
+            self?.zone.setSuspended(true)
+        }
+        controller.onDidClose = { [weak self] in self?.zone.setSuspended(false) }
+    }
+
     func showPeekPreview() {
         let sample = NowPlayingTrack(source: .spotify, id: "preview", title: "Brano di esempio",
                                      artist: "NotchTerm", album: "", isPlaying: true)
@@ -113,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hotkeyChanged = config.hotkey != controller.config.hotkey
         controller.update(config: config)
         peek.config = config
+        zone.update(config: config)
         nowPlaying.enabled = config.media.enabled
         settings?.model.externalUpdate(config)
         if hotkeyChanged { registerHotKey() }

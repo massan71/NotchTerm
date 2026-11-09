@@ -33,6 +33,22 @@ make install    # copia in /Applications e avvia
 L'app vive nella barra dei menu (icona terminale) e non ha icona nel Dock.
 Scorciatoia predefinita: **⌃`** (Control + backtick).
 
+## Il notch
+
+A terminale chiuso il notch reagisce:
+
+- **mouse sopra** per un attimo (0,3 s) → il terminale scende;
+- **clic** → il terminale scende;
+- **trascini dei file** sopra → il terminale si apre per riceverli. Rilasciali sul testo per incollare i
+  percorsi (già con gli spazi protetti), oppure sulla riga delle schede per aprire una nuova scheda in quella
+  cartella.
+
+Funziona anche trascinando direttamente sul terminale aperto. Si regola in Impostazioni → Generale → Notch
+o con `notchZone` nel config. Sugli schermi senza notch la zona è al centro della barra dei menu.
+
+**⌘clic** su un link o un percorso nel terminale lo apre (browser, Finder o l'app predefinita); con
+l'integrazione zsh i percorsi relativi partono dalla cartella della shell.
+
 ## Impostazioni
 
 Menu nella barra → **Impostazioni…** (o ⌘, dentro il terminale). Quattro sezioni: Generale (scorciatoia
@@ -109,6 +125,7 @@ Si ricarica **da solo al salvataggio**. Basta scrivere le chiavi da cambiare, pe
 | `newTabInheritsDirectory` | `true` | Le nuove schede si aprono nella cartella della scheda corrente |
 | `maxTabWidth` | `170` | Larghezza massima di una linguetta |
 | `media` | `{"enabled": true, "showInHeader": true, "peekOnTrackChange": true, "peekDuration": 4}` | Spotify / Apple Music |
+| `notchZone` | `{"hoverToOpen": true, "hoverDelay": 0.3, "clickToOpen": true, "dropFiles": true}` | Il notch a terminale chiuso |
 | `commandNotify` | `{"enabled": true, "minDuration": 10, "notifyOnSuccess": true}` | Avviso a fine comando |
 | `shellIntegration` | `true` | Integrazione zsh (serve all'avviso a fine comando) |
 | `fallbackNotchWidth` | `190` | Larghezza del notch simulato sugli schermi senza notch |
@@ -164,7 +181,8 @@ Sostituisci `toggle` con `newtab` per una nuova scheda, `settings` per le impost
 - `Sources/NotchTerm/TabBar.swift` — linguette nell'header
 - `Sources/NotchTerm/Config.swift` — configurazione JSON e ricarica automatica
 - `Sources/NotchTerm/Themes.swift` — temi inclusi e materiale di sfondo
-- `Sources/NotchTerm/ShellIntegration.swift` — hook zsh per inizio/fine comando
+- `Sources/NotchTerm/ShellIntegration.swift` — hook zsh: inizio/fine comando e cartella corrente
+- `Sources/NotchTerm/NotchZone.swift` — il notch a terminale chiuso: mouse, clic, file trascinati
 - `Sources/NotchTerm/NowPlaying.swift` — Spotify / Apple Music: stato, comandi, copertine
 - `Sources/NotchTerm/MediaViews.swift` — mini-player e avvisi dal notch (brano, fine comando)
 - `Sources/NotchTerm/Settings.swift` — finestra Impostazioni (SwiftUI)

@@ -208,6 +208,19 @@ private struct GeneralTab: View {
                     }
                 }
             }
+            Section {
+                Toggle("Apri lasciando il mouse sul notch", isOn: $model.config.notchZone.hoverToOpen)
+                LabeledSlider(title: "Attesa", value: $model.config.notchZone.hoverDelay, range: 0...1.5,
+                              format: { v in String(format: "%.2f s", v) })
+                    .disabled(!model.config.notchZone.hoverToOpen)
+                Toggle("Apri con un clic sul notch", isOn: $model.config.notchZone.clickToOpen)
+                Toggle("Trascina file sul notch", isOn: $model.config.notchZone.dropFiles)
+            } header: {
+                Text("Notch")
+            } footer: {
+                Text("Trascinando file sul notch il terminale si apre: rilasciali sul testo per incollare i percorsi, oppure sulle schede per aprire una nuova scheda in quella cartella.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Comportamento") {
                 Picker("Schermo", selection: $model.config.screen) {
                     Text("Con il notch").tag("notch")

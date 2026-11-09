@@ -38,6 +38,22 @@ final class NotchRootView: NSView {
     private var backdrop: NSView?
     private var currentMaterial = ""
 
+    /// File rilasciati sul pannello: URL e punto (coordinate della vista).
+    var onDropFiles: (([URL], NSPoint) -> Bool)? {
+        didSet { onDropFiles == nil ? unregisterDraggedTypes() : registerForDraggedTypes([.fileURL]) }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onDropFiles == nil ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self],
+                                                         options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        guard !urls.isEmpty else { return false }
+        return onDropFiles?(urls, convert(sender.draggingLocation, from: nil)) ?? false
+    }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -152,6 +168,8 @@ final class NotchController: NSObject {
     var onOpenConfig: (() -> Void)?
     /// Chiamato appena prima di aprire il pannello.
     var onWillOpen: (() -> Void)?
+    /// Chiamato quando il pannello si è chiuso del tutto.
+    var onDidClose: (() -> Void)?
     /// Un comando lungo è terminato mentre il pannello era chiuso.
     /// Parametri: esito, titolo della scheda (se più di una), azione per mostrarla.
     var onCommandNotify: ((CommandResult, String?, @escaping () -> Void) -> Void)?
@@ -178,6 +196,7 @@ final class NotchController: NSObject {
         panel.contentView = root
         panel.keyHandler = { [weak self] in self?.handleKey($0) ?? false }
 
+        root.onDropFiles = { [weak self] urls, point in self?.dropFiles(urls, at: point) ?? false }
         tabBar.onSelect = { [weak self] in self?.selectTab($0) }
         tabBar.onClose = { [weak self] in self?.closeTab(at: $0) }
         root.addSubview(tabBar)
@@ -336,6 +355,33 @@ final class NotchController: NSObject {
     #if DEBUG
     func debugType(_ text: String) { current.view.send(txt: text) }
     #endif
+
+    // MARK: - File trascinati
+
+    /// Sull'header (schede): una nuova scheda per ogni cartella (o cartella del file).
+    /// Sul terminale: incolla i percorsi, già pronti per la shell.
+    private func dropFiles(_ urls: [URL], at point: NSPoint) -> Bool {
+        guard config.notchZone.dropFiles else { return false }
+        let headerBottom = root.bounds.height - metrics.height - 4
+        if point.y >= headerBottom {
+            for url in urls {
+                var isDir: ObjCBool = false
+                FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+                newTab(directory: isDir.boolValue ? url.path : url.deletingLastPathComponent().path)
+            }
+        } else {
+            current.view.send(txt: urls.map { Self.shellEscape($0.path) }.joined(separator: " ") + " ")
+        }
+        panel.makeKey()
+        panel.makeFirstResponder(current.view)
+        return true
+    }
+
+    /// Come Terminal.app: backslash davanti ai caratteri speciali.
+    static func shellEscape(_ path: String) -> String {
+        let special = Set(" \t\\'\"()[]{}&;|<>*?$`!#~=^,")
+        return String(path.flatMap { special.contains($0) ? ["\\", $0] : [$0] })
+    }
 
     // MARK: - Fine comando
 
@@ -517,6 +563,7 @@ final class NotchController: NSObject {
         animateMask(from: from, to: collapsedPath(), opening: false) { [weak self] in
             guard let self, !self.isOpen else { return }
             self.panel.orderOut(nil)
+            self.onDidClose?()
         }
     }
 

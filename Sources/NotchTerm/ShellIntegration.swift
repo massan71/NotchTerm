@@ -68,8 +68,16 @@ enum ShellIntegration {
         printf '\e]7501;id=notchterm:state=working:title=%s\a' "$(_notchterm_b64 "$_notchterm_cmd")"
       }
 
+      # OSC 7: cartella corrente (titoli delle schede, link relativi, nuove schede).
+      _notchterm_osc7() {
+        local p=${PWD//\%/%25}
+        p=${p// /%20}
+        printf '\e]7;file://%s%s\a' "${HOST:-localhost}" "$p"
+      }
+
       _notchterm_precmd() {
         local ec=$?
+        _notchterm_osc7
         [[ -z "$_notchterm_start" ]] && return
         local dur=$(( EPOCHREALTIME - _notchterm_start ))
         local st=done
@@ -81,6 +89,7 @@ enum ShellIntegration {
 
       add-zsh-hook preexec _notchterm_preexec
       add-zsh-hook precmd _notchterm_precmd
+      add-zsh-hook chpwd _notchterm_osc7
     fi
     """#
 }
