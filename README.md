@@ -1,3 +1,5 @@
+<p align="center"><img src="Resources/AppIcon.png" width="160" alt="Icona di NotchTerm"></p>
+
 # NotchTerm
 
 Terminale a tendina (stile Quake) per macOS che esce dal notch. Premi la scorciatoia e il notch
@@ -209,6 +211,7 @@ Sostituisci `toggle` con `newtab` per una nuova scheda, `settings` per le impost
 - `Sources/NotchTerm/HotKey.swift` — scorciatoia globale (Carbon, nessun permesso richiesto)
 - `Sources/NotchTerm/main.swift` — app e menu nella barra
 - `Tests/NotchTermTests` — test (`swift test`)
+- `scripts/make-icon.swift`, `scripts/make-icon.sh` — disegnano l'icona e generano `Resources/AppIcon.icns`
 
 ## Release
 

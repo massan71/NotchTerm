@@ -28,6 +28,7 @@ S="$STAGE/NotchTerm.app"
 mkdir -p "$S/Contents/MacOS" "$S/Contents/Resources"
 cp "$BIN" "$S/Contents/MacOS/NotchTerm"
 cp "$ROOT/Resources/Info.plist" "$S/Contents/Info.plist"
+cp "$ROOT/Resources/AppIcon.icns" "$S/Contents/Resources/AppIcon.icns"
 xattr -cr "$S"
 # Firma ad-hoc: serve a SMAppService ("Avvia al login") e a Gatekeeper in locale.
 codesign --force --sign - "$S"
