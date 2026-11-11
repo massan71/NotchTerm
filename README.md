@@ -55,9 +55,9 @@ l'integrazione con la shell i percorsi relativi partono dalla cartella della she
 
 ## Impostazioni
 
-Menu nella barra → **Impostazioni…** (o ⌘, dentro il terminale). Quattro sezioni: Generale (scorciatoia
+Menu nella barra → **Impostazioni…** (o ⌘, dentro il terminale). Sezioni: Generale (scorciatoia
 con registrazione dal vivo, schermo, comportamento, avvio al login), Aspetto (temi, materiale, font, forma),
-Animazione (con pulsante di prova) e Shell. Le modifiche si applicano subito e vengono salvate in `config.json`,
+Animazione (con pulsante di prova), Musica, Shell e AI. Le modifiche si applicano subito e vengono salvate in `config.json`,
 scrivendo solo le voci cambiate.
 
 ## Liquid Glass
@@ -94,6 +94,47 @@ Si disattiva con `"shellIntegration": false`.
 Con altre shell basta emettere a fine comando la sequenza
 `ESC ] 7501 ; id=notchterm : state=done|error : title=<comando in base64> : msg=<"codice durata" in base64> BEL`
 (e `state=working` all'inizio).
+
+## Assistente AI
+
+Quattro aiuti dentro il terminale, che partono solo quando li chiedi:
+
+- **✦ o ⌘J — chat.** Il pulsante ✦ nell'header (accanto al **+**) apre una conversazione con l'assistente in
+  fondo al terminale: chiedi quello che vuoi su comandi, errori e strumenti, e continua il discorso. Spunta
+  **Allega l'output del terminale** per includere nel messaggio le ultime righe dello schermo. I comandi
+  suggeriti compaiono in verde e **Inserisci il comando** li scrive nel prompt; **Nuova chat** ricomincia.
+  La conversazione resta finché non la azzeri o chiudi NotchTerm.
+- **⌘I — dal linguaggio naturale al comando.** In fondo al terminale si apre un riquadro: scrivi cosa vuoi
+  fare («trova i file più grandi di 100 MB», «comprimi questa cartella in un zip») e ricevi il comando con una
+  riga di spiegazione. Invio (o **Inserisci**) lo scrive nel prompt **senza eseguirlo**: lo controlli e premi
+  Invio tu. I comandi che cancellano o sovrascrivono sono segnalati con ⚠️.
+- **Spiega l'errore.** Quando un comando fallisce, l'avviso dal notch ha il pulsante **Chiedi a Claude** (o
+  **Chiedi all'AI**); nel terminale basta **⌘⇧E** dopo l'errore. La risposta spiega la causa e, se c'è, propone
+  il comando che la risolve, da inserire con un clic.
+- **⌘⇧E sul testo selezionato** — un log, un errore del compilatore, un comando trovato in rete — lo spiega.
+
+Esc chiude il riquadro.
+
+### Fornitori
+
+Si sceglie in Impostazioni → AI:
+
+| Fornitore | Note |
+|---|---|
+| **Claude** (predefinito) | API nativa di Anthropic, modello predefinito `claude-opus-5-5`. Chiave da [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| OpenAI, Google Gemini, OpenRouter | Tramite il formato compatibile OpenAI; il modello va indicato (c'è **Carica elenco**) |
+| **Ollama Cloud** | I modelli di Ollama in cloud su `ollama.com`, con la chiave del tuo account; modello predefinito `gemma4:31b`, gli altri con **Carica elenco** |
+| **Ollama**, **LM Studio** | Modelli locali: niente chiave, niente costi e l'output del terminale non esce dal Mac |
+| Personalizzato | Qualsiasi servizio compatibile OpenAI: indirizzo, modello ed eventuale chiave |
+
+Le chiavi stanno nel **Portachiavi di macOS** (una per fornitore), non in `config.json`. Dopo un aggiornamento
+dell'app macOS può chiedere di nuovo il permesso di leggerle: scegli «Consenti sempre». **Prova** verifica
+chiave, indirizzo e modello con una richiesta minima.
+
+**Cosa viene inviato:** nella chat i tuoi messaggi (con le righe del terminale solo se spunti «Allega»), la
+shell e la cartella corrente; con ⌘I la richiesta, il nome della shell e la cartella corrente; per spiegare un
+errore anche il comando, il codice d'uscita e le ultime righe del terminale (60 per default, `ai.contextLines`);
+con ⌘⇧E il testo selezionato. Nient'altro, e mai senza che tu lo chieda.
 
 ## Spotify e Apple Music
 
@@ -142,6 +183,7 @@ Si ricarica **da solo al salvataggio**. Basta scrivere le chiavi da cambiare, pe
 | `media` | `{"enabled": true, "showInHeader": true, "peekOnTrackChange": true, "peekDuration": 4}` | Spotify / Apple Music |
 | `notchZone` | `{"hoverToOpen": true, "hoverDelay": 0.3, "clickToOpen": true, "dropFiles": true}` | Il notch a terminale chiuso |
 | `commandNotify` | `{"enabled": true, "minDuration": 10, "notifyOnSuccess": true, "liveIndicator": true, "liveIndicatorDelay": 3, "ignore": ["vim", "less", "ssh", …]}` | Indicatore dei comandi in corso e avviso a fine comando |
+| `ai` | `{"enabled": true, "provider": "claude", "model": "", "baseURL": "", "contextLines": 60}` | Assistente AI (`model`/`baseURL` vuoti = predefiniti del fornitore) |
 | `shellIntegration` | `true` | Integrazione zsh, bash e fish (serve a indicatore, avviso e cartella corrente) |
 | `restoreTabs` | `true` | All'avvio riapre le schede nelle loro cartelle |
 | `fallbackNotchWidth` | `190` | Larghezza del notch simulato sugli schermi senza notch |
@@ -183,7 +225,8 @@ All'avvio NotchTerm riapre le schede della volta precedente, ognuna nella sua ca
 
 ## Altre scorciatoie dentro il terminale
 
-⌘F cerca nello storico (⌘G / ⌘⇧G successivo / precedente, Esc chiude) · ⌘C copia · ⌘V incolla · ⌘A seleziona tutto · ⌘K pulisci · ⌘+ / ⌘− / ⌘0 dimensione testo · ⌘, impostazioni
+⌘F cerca nello storico (⌘G / ⌘⇧G successivo / precedente, Esc chiude) · ⌘I chiedi un comando all'AI ·
+⌘⇧E spiega selezione o ultimo errore · ⌘J chat con l'AI · ⌘C copia · ⌘V incolla · ⌘A seleziona tutto · ⌘K pulisci · ⌘+ / ⌘− / ⌘0 dimensione testo · ⌘, impostazioni
 
 ## Aprire da script
 
@@ -204,6 +247,8 @@ Sostituisci `toggle` con `newtab` per una nuova scheda, `settings` per le impost
 - `Sources/NotchTerm/ShellIntegration.swift` — hook zsh, bash e fish: inizio/fine comando e cartella corrente
 - `Sources/NotchTerm/ActivityIndicator.swift` — indicatore nel notch dei comandi in corso
 - `Sources/NotchTerm/TabStore.swift` — schede salvate e ripristinate all'avvio
+- `Sources/NotchTerm/AI.swift` — fornitori, Portachiavi, client in streaming (Claude e compatibili OpenAI), prompt
+- `Sources/NotchTerm/AIOverlay.swift` — riquadro dell'assistente nel terminale
 - `Sources/NotchTerm/NotchZone.swift` — il notch a terminale chiuso: mouse, clic, file trascinati
 - `Sources/NotchTerm/NowPlaying.swift` — Spotify / Apple Music: stato, comandi, copertine
 - `Sources/NotchTerm/MediaViews.swift` — mini-player e avvisi dal notch (brano, fine comando)

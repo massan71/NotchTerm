@@ -58,6 +58,20 @@ struct Config: Codable, Equatable {
                                 "top", "htop", "btop", "ssh", "mosh", "tmux", "screen", "watch", "claude"]
     }
 
+    /// Assistente AI: comandi dal linguaggio naturale, spiegazione di errori e selezione.
+    /// La chiave API non sta qui ma nel Portachiavi di macOS.
+    struct AI: Codable, Equatable {
+        var enabled: Bool = true
+        /// "claude", "openai", "gemini", "openrouter", "ollama", "lmstudio" o "custom".
+        var provider: String = "claude"
+        /// Vuoto = modello predefinito del fornitore (se ne ha uno).
+        var model: String = ""
+        /// Vuoto = indirizzo predefinito del fornitore. Per "custom" è obbligatorio.
+        var baseURL: String = ""
+        /// Righe di output del terminale inviate quando si chiede di spiegare un errore.
+        var contextLines: Int = 60
+    }
+
     /// Colori che sovrascrivono quelli del tema. Formato "#RRGGBB".
     struct Colors: Codable, Equatable {
         var background: String?
@@ -111,6 +125,7 @@ struct Config: Codable, Equatable {
     var animation: Animation = Animation()
     var media: Media = Media()
     var commandNotify: CommandNotify = CommandNotify()
+    var ai: AI = AI()
     var notchZone: NotchZone = NotchZone()
     /// Integrazione con zsh, bash e fish: serve all'avviso a fine comando,
     /// all'indicatore nel notch e alla cartella corrente delle schede.

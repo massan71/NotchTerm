@@ -160,6 +160,8 @@ final class PeekController {
     private let titleLabel = NSTextField(labelWithString: "")
     private let artistLabel = NSTextField(labelWithString: "")
     private let buttons = MediaButtons(pointSize: 13)
+    private let askButton = NSButton()
+    private var onAsk: (() -> Void)?
 
     private var metrics = NotchMetrics(width: 190, height: 32, hasHardwareNotch: false)
     private var hideTimer: Timer?
@@ -201,6 +203,17 @@ final class PeekController {
         }
         content.addSubview(art)
         content.addSubview(buttons)
+        askButton.bezelStyle = .rounded
+        askButton.controlSize = .small
+        askButton.font = .systemFont(ofSize: 11.5, weight: .semibold)
+        askButton.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        askButton.imagePosition = .imageLeading
+        askButton.target = self
+        askButton.action = #selector(askAction)
+        askButton.appearance = NSAppearance(named: .darkAqua)
+        askButton.isHidden = true
+        content.addSubview(askButton)
         content.onClick = { [weak self] in
             self?.onContentClick?()
             self?.hide()
@@ -215,15 +228,24 @@ final class PeekController {
         mode = .media
         onContentClick = onActivate
         buttons.isHidden = false
+        askButton.isHidden = true
         fill(track: track, artwork: artwork)
         present(duration: config.media.peekDuration)
     }
 
-    /// Esito di un comando terminato. Un clic sull'avviso esegue `onClick`.
-    func show(command result: CommandResult, tab: String?, onClick: @escaping () -> Void) {
+    /// Esito di un comando terminato. Un clic sull'avviso esegue `onClick`; se c'è
+    /// `ask` (comando fallito, assistente attivo) compare il pulsante per chiedere all'AI.
+    func show(command result: CommandResult, tab: String?, onClick: @escaping () -> Void,
+              ask: (label: String, action: () -> Void)? = nil) {
         mode = .command
         onContentClick = onClick
         buttons.isHidden = true
+        onAsk = ask?.action
+        askButton.isHidden = ask == nil
+        if let ask {
+            askButton.title = ask.label
+            askButton.sizeToFit()
+        }
         let ok = result.succeeded
         art.setSymbol(ok ? "checkmark" : "xmark",
                       color: ok ? NSColor(srgbRed: 0.35, green: 0.86, blue: 0.5, alpha: 1)
@@ -345,10 +367,20 @@ final class PeekController {
         layoutLabels()
     }
 
+    @objc private func askAction() {
+        onAsk?()
+        hide()
+    }
+
     private func layoutLabels() {
         let ch = content.bounds.height
         let tx = art.frame.maxX + 11
-        let right = buttons.isHidden ? content.bounds.width : buttons.frame.minX - 10
+        if !askButton.isHidden {
+            let bw = askButton.frame.width + 6
+            askButton.frame = NSRect(x: content.bounds.width - bw, y: (ch - 24) / 2, width: bw, height: 24)
+        }
+        let right = !askButton.isHidden ? askButton.frame.minX - 10
+            : buttons.isHidden ? content.bounds.width : buttons.frame.minX - 10
         let tw = max(0, right - tx)
         titleLabel.frame = NSRect(x: tx, y: ch / 2 + 1, width: tw, height: 17)
         artistLabel.frame = NSRect(x: tx, y: ch / 2 - 16, width: tw, height: 15)

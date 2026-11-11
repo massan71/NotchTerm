@@ -11,6 +11,15 @@ final class SettingsModel: ObservableObject {
     }
     @Published var recordingHotkey = false
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @Published var selectedTab = "general"
+
+    // Assistente AI
+    @Published var aiKey = ""
+    @Published var aiModels: [String] = []
+    @Published var aiStatus: String?
+    @Published var aiBusy = false
+    private var aiKeyLoadedFor: String?
+    private var pendingKeySave: DispatchWorkItem?
 
     var onTryAnimation: (() -> Void)?
     var onTryPeek: (() -> Void)?
@@ -106,6 +115,109 @@ final class SettingsModel: ObservableObject {
         recordingHotkey = false
     }
 
+    // MARK: Assistente AI
+
+    var aiProvider: AIProvider { AIProvider.named(config.ai.provider) }
+
+    var providerBinding: Binding<String> {
+        Binding(get: { self.aiProvider.id }, set: { id in
+            guard id != self.aiProvider.id else { return }
+            self.flushKeySave()
+            self.config.ai.provider = id
+            // Modello e indirizzo valgono per il fornitore precedente.
+            self.config.ai.model = ""
+            self.config.ai.baseURL = ""
+            self.aiModels = []
+            self.aiStatus = nil
+            self.loadAIKey()
+        })
+    }
+
+    /// Legge dal Portachiavi la chiave del fornitore scelto (una volta per fornitore).
+    func loadAIKey() {
+        let id = aiProvider.id
+        guard aiKeyLoadedFor != id else { return }
+        aiKeyLoadedFor = id
+        aiKey = AIKeychain.key(for: id) ?? ""
+    }
+
+    var keyBinding: Binding<String> {
+        Binding(get: { self.aiKey }, set: { value in
+            self.aiKey = value
+            self.pendingKeySave?.cancel()
+            let id = self.aiProvider.id
+            let item = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    AIKeychain.setKey(value, for: id)
+                    self?.pendingKeySave = nil
+                }
+            }
+            self.pendingKeySave = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
+        })
+    }
+
+    /// Salva subito una chiave in attesa (cambio di fornitore, prova, chiusura).
+    func flushKeySave() {
+        guard let item = pendingKeySave else { return }
+        item.cancel()
+        pendingKeySave = nil
+        AIKeychain.setKey(aiKey, for: aiProvider.id)
+    }
+
+    private var aiSettings: AISettings { AISettings(config.ai, key: aiKey) }
+
+    func fetchAIModels() {
+        flushKeySave()
+        let client = AIClient(settings: aiSettings)
+        aiBusy = true
+        aiStatus = nil
+        Task { [weak self] in
+            do {
+                let models = try await client.listModels()
+                await MainActor.run {
+                    self?.aiModels = models.sorted()
+                    self?.aiStatus = models.isEmpty ? "Il servizio non ha restituito modelli." : nil
+                    self?.aiBusy = false
+                }
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                await MainActor.run {
+                    self?.aiStatus = "⚠︎ " + message
+                    self?.aiBusy = false
+                }
+            }
+        }
+    }
+
+    /// Una richiesta minima per verificare chiave, indirizzo e modello.
+    func testAI() {
+        flushKeySave()
+        let settings = aiSettings
+        if let problem = settings.problem { aiStatus = "⚠︎ " + problem; return }
+        let client = AIClient(settings: settings)
+        aiBusy = true
+        aiStatus = nil
+        let started = Date()
+        Task { [weak self] in
+            do {
+                let reply = try await client.stream(AIRequest(system: "Reply with the single word: ok", user: "ping",
+                                                              maxTokens: 512, effort: "low")) { _ in }
+                let secs = String(format: "%.1f", Date().timeIntervalSince(started))
+                await MainActor.run {
+                    self?.aiStatus = reply.isEmpty ? "⚠︎ Risposta vuota." : "✓ Funziona: \(settings.model) ha risposto in \(secs) s."
+                    self?.aiBusy = false
+                }
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                await MainActor.run {
+                    self?.aiStatus = "⚠︎ " + message
+                    self?.aiBusy = false
+                }
+            }
+        }
+    }
+
     // MARK: Binding di comodo per i valori opzionali (default dal tema)
 
     var surface: Surface { Surface.resolve(config) }
@@ -146,7 +258,8 @@ final class SettingsWindowController {
 
     init(model: SettingsModel) { self.model = model }
 
-    func show() {
+    func show(tab: String? = nil) {
+        if let tab { model.selectedTab = tab }
         if window == nil {
             let host = NSHostingController(rootView: SettingsView(model: model))
             let w = NSWindow(contentViewController: host)
@@ -168,12 +281,13 @@ struct SettingsView: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        TabView {
-            GeneralTab(model: model).tabItem { Label("Generale", systemImage: "gearshape") }
-            AppearanceTab(model: model).tabItem { Label("Aspetto", systemImage: "paintpalette") }
-            AnimationTab(model: model).tabItem { Label("Animazione", systemImage: "wand.and.rays") }
-            MusicTab(model: model).tabItem { Label("Musica", systemImage: "music.note") }
-            ShellTab(model: model).tabItem { Label("Shell", systemImage: "terminal") }
+        TabView(selection: $model.selectedTab) {
+            GeneralTab(model: model).tabItem { Label("Generale", systemImage: "gearshape") }.tag("general")
+            AppearanceTab(model: model).tabItem { Label("Aspetto", systemImage: "paintpalette") }.tag("appearance")
+            AnimationTab(model: model).tabItem { Label("Animazione", systemImage: "wand.and.rays") }.tag("animation")
+            MusicTab(model: model).tabItem { Label("Musica", systemImage: "music.note") }.tag("music")
+            ShellTab(model: model).tabItem { Label("Shell", systemImage: "terminal") }.tag("shell")
+            AITab(model: model).tabItem { Label("AI", systemImage: "sparkles") }.tag("ai")
         }
         .padding(.top, 8)
         .frame(width: 620, height: 600)
@@ -409,6 +523,73 @@ private func percent(_ v: Double) -> String { "\(Int((v * 100).rounded()))%" }
 private func points(_ v: Double) -> String { "\(Int(v.rounded())) pt" }
 private func seconds(_ v: Double) -> String { String(format: "%.2f s", v) }
 private func twoDecimals(_ v: Double) -> String { String(format: "%.2f", v) }
+
+private struct AITab: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        let provider = model.aiProvider
+        Form {
+            Section {
+                Toggle("Attiva l'assistente", isOn: $model.config.ai.enabled)
+                Picker("Fornitore", selection: model.providerBinding) {
+                    ForEach(AIProvider.all, id: \.id) { p in Text(p.name).tag(p.id) }
+                }
+            } footer: {
+                Text("✦ nell'header o ⌘J apre la chat con l'assistente. ⌘I descrivi cosa vuoi fare e ricevi il comando, che viene scritto nel prompt senza eseguirlo. ⌘⇧E spiega il testo selezionato o, senza selezione, l'ultimo comando fallito. Sugli avvisi di errore dal notch compare «\(provider.askLabel)».")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Accesso") {
+                if provider.needsKey || provider.id == "custom" {
+                    SecureField(provider.needsKey ? "Chiave API" : "Chiave API (se serve)", text: model.keyBinding)
+                    if let url = provider.keyURL.flatMap(URL.init(string:)) {
+                        Link("Ottieni una chiave per \(provider.name)", destination: url).font(.caption)
+                    }
+                }
+                TextField("Indirizzo", text: $model.config.ai.baseURL,
+                          prompt: Text(provider.defaultBaseURL.isEmpty ? "https://…/v1" : provider.defaultBaseURL))
+                HStack {
+                    TextField("Modello", text: $model.config.ai.model,
+                              prompt: Text(provider.defaultModel ?? "nome del modello"))
+                    Menu("Scegli") {
+                        if model.aiModels.isEmpty {
+                            Text("Premi «Carica elenco»")
+                        } else {
+                            ForEach(model.aiModels, id: \.self) { m in
+                                Button(m) { model.config.ai.model = m }
+                            }
+                        }
+                    }
+                    .fixedSize()
+                    Button("Carica elenco") { model.fetchAIModels() }
+                        .disabled(model.aiBusy)
+                }
+                HStack {
+                    Button("Prova") { model.testAI() }.disabled(model.aiBusy)
+                    if model.aiBusy { ProgressView().controlSize(.small) }
+                    if let status = model.aiStatus {
+                        Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                    }
+                }
+            }
+
+            Section {
+                Stepper(value: $model.config.ai.contextLines, in: 10...300, step: 10) {
+                    Text("Righe di output inviate per spiegare un errore: \(model.config.ai.contextLines)")
+                }
+            } header: {
+                Text("Privacy")
+            } footer: {
+                Text("Non viene inviato niente da solo: solo quando scrivi nella chat o usi ⌘I, ⌘⇧E o «\(provider.askLabel)». Con ⌘I si inviano la richiesta, la shell e la cartella corrente; per spiegare un errore anche il comando, il codice d'uscita e le ultime righe del terminale; con ⌘⇧E il testo selezionato. Le chiavi stanno nel Portachiavi di macOS, non in config.json. Con Ollama o LM Studio tutto resta sul tuo Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { model.loadAIKey() }
+        .onDisappear { model.flushKeySave() }
+    }
+}
 
 private struct LabeledSlider: View {
     let title: String

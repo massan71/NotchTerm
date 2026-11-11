@@ -113,7 +113,11 @@ import Testing
         #expect(TerminalSession.tabTitle(shellTitle: "", displayTitle: "~") == "~")
     }
 
-    @Test func savedTabsDropMissingFolders() {
+    @Test func compactsLongSpaces() {
+        #expect(TerminalSession.compactSpaces("~        12:00\na  b") == "~  12:00\na  b")
+    }
+
+        @Test func savedTabsDropMissingFolders() {
         let tabs = SavedTabs(directories: ["/a", "/gone", "/c", "/gone2", "/e"], selected: 3)
         let v = tabs.validated { !$0.hasPrefix("/gone") }
         #expect(v == SavedTabs(directories: ["/a", "/c", "/e"], selected: 1))

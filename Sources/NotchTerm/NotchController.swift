@@ -151,6 +151,8 @@ final class NotchController: NSObject {
     private let root: NotchRootView
     private let tabBar = TabBarView()
     private let newTabButton = NSButton()
+    /// Pulsante dell'assistente nell'header, accanto al "+".
+    private let aiButton = NSButton()
     let mediaView = HeaderMediaView()
     private var mediaTrack: NowPlayingTrack?
     private var mediaArtwork: NSImage?
@@ -172,10 +174,22 @@ final class NotchController: NSObject {
     var onDidClose: (() -> Void)?
     /// Un comando lungo è terminato mentre il pannello era chiuso.
     /// Parametri: esito, titolo della scheda (se più di una), azione per mostrarla.
-    var onCommandNotify: ((CommandResult, String?, @escaping () -> Void) -> Void)?
+    /// L'ultimo parametro, se c'è, chiede all'AI di spiegare l'errore (etichetta, azione).
+    var onCommandNotify: ((CommandResult, String?, @escaping () -> Void, (label: String, action: () -> Void)?) -> Void)?
     /// Un comando è partito o finito in una scheda (per l'indicatore nel notch).
     var onActivityChange: (() -> Void)?
+    /// Apre le impostazioni sulla sezione AI.
+    var onOpenAISettings: (() -> Void)?
     private var pendingSave: DispatchWorkItem?
+
+    /// Assistente AI in fondo al terminale.
+    private let aiOverlay = AIOverlayView(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
+    private var aiTask: Task<Void, Never>?
+    /// Cresce a ogni richiesta: gli aggiornamenti di richieste superate si scartano.
+    private var aiRequestID = 0
+    /// Chat con l'assistente: messaggi inviati al modello e come si mostrano.
+    private var chatHistory: [AIMessage] = []
+    private var chatTurns: [AIOverlayView.ChatTurn] = []
 
     var tabCount: Int { sessions.count }
 
@@ -212,7 +226,28 @@ final class NotchController: NSObject {
         newTabButton.target = self
         newTabButton.action = #selector(newTabAction)
         root.addSubview(newTabButton)
+
+        aiButton.isBordered = false
+        aiButton.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Assistente AI")?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
+        aiButton.imagePosition = .imageOnly
+        aiButton.target = self
+        aiButton.action = #selector(aiButtonAction)
+        root.addSubview(aiButton)
         root.addSubview(mediaView)
+        aiOverlay.isHidden = true
+        aiOverlay.onClose = { [weak self] in self?.closeAI() }
+        aiOverlay.onResize = { [weak self] in self?.layoutAI() }
+        aiOverlay.onInsert = { [weak self] cmd in self?.insertCommand(cmd) }
+        aiOverlay.onSubmit = { [weak self] text in self?.runCommandRequest(text) }
+        aiOverlay.onChatSubmit = { [weak self] text, attach in self?.sendChat(text, attachOutput: attach) }
+        aiOverlay.onNewChat = { [weak self] in self?.newChat() }
+        aiOverlay.onOpenSettings = { [weak self] in
+            self?.closeAI()
+            self?.close()
+            self?.onOpenAISettings?()
+        }
+        root.addSubview(aiOverlay)
 
         NotificationCenter.default.addObserver(self, selector: #selector(panelResignedKey),
                                                name: NSWindow.didResignKeyNotification, object: panel)
@@ -252,6 +287,9 @@ final class NotchController: NSObject {
                         tint: bg.withAlphaComponent(CGFloat(surface.opacity)),
                         border: CGFloat(surface.borderOpacity))
         newTabButton.contentTintColor = foreground.withAlphaComponent(0.6)
+        aiButton.contentTintColor = NSColor(srgbRed: 0.75, green: 0.6, blue: 1, alpha: 0.95)
+        aiButton.toolTip = "\(AIProvider.named(config.ai.provider).askLabel) (⌘J)"
+        aiOverlay.applyTheme(foreground: foreground, background: bg)
         refreshMedia()
         tabBar.maxTabWidth = CGFloat(config.maxTabWidth)
         for s in sessions { style(s.view) }
@@ -314,7 +352,8 @@ final class NotchController: NSObject {
         s.onExit = { [weak self] in self?.sessionExited($0) }
         s.onCommandFinished = { [weak self] in self?.commandFinished($0, $1) }
         s.onActivityChange = { [weak self] _ in self?.onActivityChange?() }
-        root.addSubview(s.view)
+        // Il terminale va sotto al riquadro dell'assistente.
+        root.addSubview(s.view, positioned: .below, relativeTo: aiOverlay)
         root.bringBorderToFront()
         let insertAt = sessions.isEmpty ? 0 : selectedIndex + 1
         sessions.insert(s, at: insertAt)
@@ -365,6 +404,33 @@ final class NotchController: NSObject {
 
     #if DEBUG
     func debugType(_ text: String) { current.view.send(txt: text) }
+
+    /// Pilota l'assistente dai test: "ask" con un testo, "explain", "insert".
+    func debugAI(action: String, text: String) {
+        switch action {
+        case "ask":
+            askAI()
+            aiOverlay.input.stringValue = text
+            aiOverlay.input.sendAction(aiOverlay.input.action, to: aiOverlay.input.target)
+        case "explain": explainAI()
+        case "chat":
+            chatAI()
+            if !text.isEmpty {
+                aiOverlay.input.stringValue = text
+                aiOverlay.input.sendAction(aiOverlay.input.action, to: aiOverlay.input.target)
+            }
+        case "close": closeAI()
+        default: break
+        }
+    }
+
+    /// Salva un'immagine del pannello (per controllare l'aspetto senza catturare lo schermo).
+    func debugSnapshot(to path: String) {
+        guard let view = panel.contentView,
+              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
     #endif
 
     // MARK: - File trascinati
@@ -392,6 +458,208 @@ final class NotchController: NSObject {
     static func shellEscape(_ path: String) -> String {
         let special = Set(" \t\\'\"()[]{}&;|<>*?$`!#~=^,")
         return String(path.flatMap { special.contains($0) ? ["\\", $0] : [$0] })
+    }
+
+    // MARK: - Assistente AI
+
+    private var aiSettings: AISettings {
+        AISettings(config.ai, key: AIKeychain.key(for: AIProvider.named(config.ai.provider).id))
+    }
+
+    private var aiContext: AIPrompts.Context {
+        current.refreshDirectory()
+        let shell = config.shell.isEmpty ? (ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh") : config.shell
+        return AIPrompts.Context(shell: (shell as NSString).lastPathComponent, directory: current.cwd)
+    }
+
+    /// true se l'assistente si può usare; altrimenti mostra il motivo nel riquadro.
+    private func checkAI() -> Bool {
+        if !config.ai.enabled {
+            aiOverlay.setError("L'assistente AI è disattivato.", offerSettings: true)
+            return false
+        }
+        if let problem = aiSettings.problem {
+            aiOverlay.setError(problem, offerSettings: true)
+            return false
+        }
+        return true
+    }
+
+    private func showAI() {
+        aiOverlay.isHidden = false
+        layoutAI()
+    }
+
+    func layoutAI() {
+        guard !aiOverlay.isHidden else { return }
+        let w = terminalFrame.width
+        aiOverlay.maxTextHeight = max(60, terminalFrame.height * 0.5)
+        let h = min(terminalFrame.height, aiOverlay.preferredHeight(width: w))
+        aiOverlay.frame = NSRect(x: terminalFrame.minX, y: terminalFrame.minY, width: w, height: h)
+        aiOverlay.needsLayout = true
+    }
+
+    func closeAI(refocus: Bool = true) {
+        aiTask?.cancel()
+        aiTask = nil
+        aiRequestID += 1
+        aiOverlay.isHidden = true
+        if refocus, isOpen { panel.makeFirstResponder(current.view) }
+    }
+
+    // MARK: Chat
+
+    @objc private func aiButtonAction() {
+        // Secondo clic: chiude la chat.
+        if !aiOverlay.isHidden, aiOverlay.mode == .chat { closeAI(); return }
+        chatAI()
+    }
+
+    /// ⌘J o il pulsante ✦: conversazione libera con l'assistente.
+    func chatAI() {
+        if !isOpen { open() }
+        aiTask?.cancel()
+        aiRequestID += 1
+        aiOverlay.showChat(title: AIProvider.named(config.ai.provider).isClaude ? "Chat con Claude" : "Chat con l'AI",
+                           turns: chatTurns)
+        showAI()
+        if checkAI() { panel.makeFirstResponder(aiOverlay.input) }
+    }
+
+    private func newChat() {
+        aiTask?.cancel()
+        aiRequestID += 1
+        chatHistory = []
+        chatTurns = []
+        aiOverlay.setChat(turns: [], streaming: nil)
+        panel.makeFirstResponder(aiOverlay.input)
+    }
+
+    private func sendChat(_ text: String, attachOutput: Bool) {
+        guard checkAI() else { return }
+        // Una domanda rimasta senza risposta (errore, chat chiusa a metà) si sostituisce con questa.
+        if chatHistory.last?.role == "user" {
+            chatHistory.removeLast()
+            if chatTurns.last?.role == "user" { chatTurns.removeLast() }
+        }
+        var content = text
+        if attachOutput {
+            let output = current.recentOutput(lines: aiSettings.contextLines)
+            content += "\n\nUltime righe del mio terminale:\n```\n\(output)\n```"
+        }
+        chatHistory.append(AIMessage(role: "user", content: content))
+        chatTurns.append(.init(role: "user", text: text, attachedOutput: attachOutput))
+        aiOverlay.setChat(turns: chatTurns, streaming: "")
+        let request = AIPrompts.chat(chatHistory, aiContext)
+        run(request) { [weak self] reply, finished in
+            guard let self else { return }
+            if finished {
+                self.chatHistory.append(AIMessage(role: "assistant", content: reply))
+                self.chatTurns.append(.init(role: "assistant", text: reply))
+                self.aiOverlay.setChat(turns: self.chatTurns, streaming: nil)
+            } else {
+                self.aiOverlay.setChat(turns: self.chatTurns, streaming: reply)
+            }
+        }
+    }
+
+    /// ⌘I: descrivi cosa vuoi fare, ricevi il comando.
+    func askAI() {
+        if !isOpen { open() }
+        aiTask?.cancel()
+        aiOverlay.showAsk(title: "\(AIProvider.named(config.ai.provider).askLabel) un comando")
+        showAI()
+        if checkAI() { panel.makeFirstResponder(aiOverlay.input) }
+    }
+
+    private func runCommandRequest(_ text: String) {
+        guard checkAI() else { return }
+        let request = AIPrompts.command(text, aiContext)
+        run(request) { [weak self] reply, finished in
+            guard finished else { return }
+            let (cmd, explanation) = AIPrompts.parseCommand(reply)
+            self?.aiOverlay.setCommand(cmd, explanation: explanation, prompt: text)
+        }
+    }
+
+    /// ⌘⇧E: spiega il testo selezionato o, senza selezione, l'ultimo comando fallito.
+    func explainAI() {
+        if let text = current.selectedText {
+            startExplain(title: "Spiegazione della selezione", request: AIPrompts.explainText(String(text.prefix(12_000)), aiContext))
+        } else if let r = current.lastResult, !r.succeeded {
+            explainFailure(r, in: current)
+        } else {
+            if !isOpen { open() }
+            aiOverlay.showExplain(title: "Spiega")
+            showAI()
+            aiOverlay.setError("Seleziona del testo da spiegare, oppure usa ⌘⇧E dopo un comando fallito.", offerSettings: false)
+        }
+    }
+
+    /// Spiega l'ultimo comando fallito della scheda di `session` (anche dall'avviso nel notch).
+    func explainFailure(_ result: CommandResult, in session: TerminalSession) {
+        if let i = sessions.firstIndex(where: { $0 === session }) { selectTab(i) }
+        let output = session.recentOutput(lines: aiSettings.contextLines)
+        let cmd = result.command.isEmpty ? "(sconosciuto)" : result.command
+        startExplain(title: "Perché «\(String(cmd.prefix(60)))» non ha funzionato",
+                     request: AIPrompts.explainFailure(command: cmd, exitCode: result.exitCode, output: output, aiContext))
+    }
+
+    private func startExplain(title: String, request: AIRequest) {
+        if !isOpen { open() }
+        aiTask?.cancel()
+        aiOverlay.showExplain(title: title)
+        showAI()
+        guard checkAI() else { return }
+        run(request) { [weak self] reply, finished in
+            self?.aiOverlay.setExplanation(reply, finished: finished)
+        }
+    }
+
+    /// Esegue una richiesta in streaming; `update` riceve il testo accumulato.
+    private func run(_ request: AIRequest, update: @escaping @MainActor (String, Bool) -> Void) {
+        let client = AIClient(settings: aiSettings)
+        aiTask?.cancel()
+        aiRequestID += 1
+        let id = aiRequestID
+        aiTask = Task { [weak self] in
+            var text = ""
+            do {
+                let full = try await client.stream(request) { chunk in
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            text += chunk
+                            if self?.aiRequestID == id { update(text, false) }
+                        }
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                // Il testo finale si usa dopo gli ultimi aggiornamenti in coda.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { if self?.aiRequestID == id { update(full, true) } }
+                }
+            } catch is CancellationError {
+            } catch let e as URLError where e.code == .cancelled {
+            } catch {
+                guard !Task.isCancelled else { return }
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                let local = AIProvider.named(self?.config.ai.provider ?? "").needsKey == false
+                let hint = local && (error as? URLError)?.code == .cannotConnectToHost
+                    ? " Il server locale è avviato?" : ""
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard self?.aiRequestID == id else { return }
+                        self?.aiOverlay.setError(message + hint, offerSettings: error is AIError)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Scrive il comando nel prompt senza eseguirlo e chiude l'assistente.
+    private func insertCommand(_ cmd: String) {
+        closeAI()
+        current.view.send(txt: cmd)
     }
 
     // MARK: - Comandi in corso
@@ -457,11 +725,20 @@ final class NotchController: NSObject {
         refreshTabBar()
         if !isOpen {
             let tab = sessions.count > 1 ? s.plainShortTitle : nil
-            onCommandNotify?(result, tab) { [weak self, weak s] in
+            let show = { [weak self, weak s] in
                 guard let self, let s, let i = self.sessions.firstIndex(where: { $0 === s }) else { return }
                 self.selectTab(i)
                 self.open()
             }
+            var ask: (label: String, action: () -> Void)?
+            if !result.succeeded, config.ai.enabled {
+                ask = (AIProvider.named(config.ai.provider).askLabel, { [weak self, weak s] in
+                    guard let self, let s else { return }
+                    if !self.isOpen { self.open() }
+                    self.explainFailure(result, in: s)
+                })
+            }
+            onCommandNotify?(result, tab, show, ask)
         }
     }
 
@@ -501,6 +778,7 @@ final class NotchController: NSObject {
         tabBar.update(titles: titles, selected: selectedIndex, tint: foreground)
         tabBar.isHidden = !config.showHeader
         newTabButton.isHidden = !config.showHeader
+        aiButton.isHidden = !config.showHeader || !config.ai.enabled
         scheduleSave()
     }
 
@@ -538,9 +816,12 @@ final class NotchController: NSObject {
         let notchRight = w / 2 + metrics.width / 2 + 12
         let rightEdge = w - ear - pad
         tabBar.frame = NSRect(x: leftEdge, y: bodyH - headerH, width: max(0, notchLeft - leftEdge), height: headerH)
+        layoutAI()
         newTabButton.frame = NSRect(x: rightEdge - 20, y: bodyH - headerH + (headerH - 20) / 2, width: 20, height: 20)
+        aiButton.frame = NSRect(x: newTabButton.frame.minX - 26, y: newTabButton.frame.minY, width: 20, height: 20)
+        let mediaRight = (aiButton.isHidden ? newTabButton.frame.minX : aiButton.frame.minX) - 10
         mediaView.frame = NSRect(x: notchRight, y: bodyH - headerH,
-                                 width: max(0, newTabButton.frame.minX - 10 - notchRight), height: headerH)
+                                 width: max(0, mediaRight - notchRight), height: headerH)
         refreshTabBar()
         refreshMedia()
     }
@@ -562,7 +843,7 @@ final class NotchController: NSObject {
 
     func toggle() { isOpen ? close() : open() }
 
-    private var fadingViews: [NSView] { [current.view, tabBar, newTabButton, mediaView] }
+    private var fadingViews: [NSView] { [current.view, tabBar, newTabButton, aiButton, mediaView] }
 
     // MARK: - Musica
 
@@ -615,6 +896,7 @@ final class NotchController: NSObject {
     func close() {
         guard isOpen else { return }
         isOpen = false
+        if !aiOverlay.isHidden { closeAI(refocus: false) }
         if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
 
         let from = root.maskLayer.presentation()?.path ?? expandedPath()
@@ -669,6 +951,13 @@ final class NotchController: NSObject {
     private func handleKey(_ e: NSEvent) -> Bool {
         let mods = e.modifierFlags.intersection([.command, .control, .option, .shift])
         let code = Int(e.keyCode)
+
+        // Esc chiude l'assistente (se è aperto); altrimenti arriva al terminale.
+        if code == kVK_Escape, mods.isEmpty, !aiOverlay.isHidden { closeAI(); return true }
+        // ⌘I: comando dal linguaggio naturale. ⌘⇧E: spiega selezione o ultimo errore.
+        if code == kVK_ANSI_I, mods == [.command] { askAI(); return true }
+        if code == kVK_ANSI_J, mods == [.command] { chatAI(); return true }
+        if code == kVK_ANSI_E, mods == [.command, .shift] { explainAI(); return true }
 
         // ⌃Tab / ⌃⇧Tab: scheda successiva / precedente
         if code == kVK_Tab, mods == [.control] { cycleTab(1); return true }

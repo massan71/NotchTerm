@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastError = error
         controller = NotchController(config: config, restoring: TabStore.load())
         controller.onOpenConfig = { [weak self] in self?.showSettings() }
+        controller.onOpenAISettings = { [weak self] in self?.showSettings(tab: "ai") }
         setUpMedia(config)
         setUpZone(config)
         setUpActivity(config)
@@ -45,6 +46,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DistributedNotificationCenter.default().addObserver(forName: .init("net.sangalli.notchterm.debug-type"), object: nil, queue: .main) { [weak self] n in
             let text = n.userInfo?["text"] as? String ?? ""
             MainActor.assumeIsolated { self?.controller.debugType(text) }
+        }
+        DistributedNotificationCenter.default().addObserver(forName: .init("net.sangalli.notchterm.debug-ai"), object: nil, queue: .main) { [weak self] n in
+            let action = n.userInfo?["action"] as? String ?? ""
+            let text = n.userInfo?["text"] as? String ?? ""
+            MainActor.assumeIsolated { self?.controller.debugAI(action: action, text: text) }
+        }
+        DistributedNotificationCenter.default().addObserver(forName: .init("net.sangalli.notchterm.debug-snapshot"), object: nil, queue: .main) { [weak self] n in
+            let path = n.userInfo?["path"] as? String ?? "/tmp/notchterm.png"
+            MainActor.assumeIsolated { self?.controller.debugSnapshot(to: path) }
         }
         #endif
         watcher = ConfigWatcher { [weak self] in self?.reloadConfig(silent: true) }
@@ -78,8 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.peek.refresh(track: track, artwork: art)
             }
         }
-        controller.onCommandNotify = { [weak self] result, tab, show in
-            self?.peek.show(command: result, tab: tab, onClick: show)
+        controller.onCommandNotify = { [weak self] result, tab, show, ask in
+            self?.peek.show(command: result, tab: tab, onClick: show, ask: ask)
         }
         controller.onWillOpen = { [weak self] in
             self?.peek.hide(immediately: true)
@@ -250,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.showSettings() }
     }
 
-    private func showSettings() {
+    private func showSettings(tab: String? = nil) {
         if settings == nil {
             let model = SettingsModel(config: controller.config)
             model.onTryAnimation = { [weak self] in self?.controller.toggle() }
@@ -259,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             settings = SettingsWindowController(model: model)
         }
         controller.close()
-        settings?.show()
+        settings?.show(tab: tab)
     }
 
     @objc private func openConfigAction() { openConfig() }

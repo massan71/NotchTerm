@@ -18,6 +18,8 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     private(set) var runningCommand: String?
     /// Da quando è in esecuzione.
     private(set) var runningSince: Date?
+    /// Ultimo comando terminato (per "spiega l'errore").
+    private(set) var lastResult: CommandResult?
     /// Esito non ancora visto (scheda in secondo piano): "✓" o "✗".
     var badge: String?
 
@@ -114,6 +116,29 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         return displayTitle == "~" ? displayTitle : ((displayTitle as NSString).lastPathComponent)
     }
 
+    /// Testo selezionato nel terminale, se c'è.
+    var selectedText: String? {
+        guard let s = view.getSelection()?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// Ultime `count` righe del terminale (senza le righe vuote in fondo, sotto al cursore).
+    func recentOutput(lines count: Int) -> String {
+        let text = String(decoding: view.getBufferAsData(), as: UTF8.self)
+        var rows = text.components(separatedBy: "\n").map { line -> String in
+            var l = line
+            while l.last == " " { l.removeLast() }
+            return l
+        }
+        while let last = rows.last, last.isEmpty { rows.removeLast() }
+        return Self.compactSpaces(rows.suffix(count).joined(separator: "\n"))
+    }
+
+    /// Riduce le lunghe file di spazi (prompt allineati a destra, tabelle) a due spazi.
+    static func compactSpaces(_ text: String) -> String {
+        text.replacingOccurrences(of: " {3,}", with: "  ", options: .regularExpression)
+    }
+
     // MARK: LocalProcessTerminalViewDelegate
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
@@ -143,7 +168,9 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
             runningCommand = nil
             runningSince = nil
             let (code, duration) = CommandResult.parse(message: r.message ?? "", failed: r.state == .error)
-            onCommandFinished?(self, CommandResult(command: r.title ?? "", exitCode: code, duration: duration))
+            let result = CommandResult(command: r.title ?? "", exitCode: code, duration: duration)
+            lastResult = result
+            onCommandFinished?(self, result)
             onActivityChange?(self)
         default:
             break
