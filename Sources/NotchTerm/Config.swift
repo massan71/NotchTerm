@@ -134,6 +134,10 @@ struct Config: Codable, Equatable {
     var restoreTabs: Bool = true
     /// Chiude il pannello quando si clicca altrove.
     var hideOnFocusLoss: Bool = true
+    /// Da dove esce il pannello: "notch" (dal notch, sopra la barra dei menu)
+    /// o "menubar" (appena sotto la barra dei menu, che resta visibile).
+    var position: String = "notch"
+    var belowMenuBar: Bool { position.lowercased() == "menubar" }
     /// Su quale schermo aprire: "notch" (quello col notch, se c'è), "main", "mouse".
     var screen: String = "notch"
     /// Mostra il titolo/cartella corrente accanto al notch.
@@ -241,20 +245,40 @@ enum ConfigStore {
 /// Osserva la cartella di configurazione e richiama `onChange` quando il file cambia.
 /// Si osserva la cartella (non il file) perché molti editor salvano sostituendo il file.
 final class ConfigWatcher {
-    private var source: DispatchSourceFileSystemObject?
+    private var dirSource: DispatchSourceFileSystemObject?
+    private var fileSource: DispatchSourceFileSystemObject?
     private var pending: DispatchWorkItem?
     private let onChange: @MainActor () -> Void
 
     init(onChange: @escaping @MainActor () -> Void) {
         self.onChange = onChange
         ConfigStore.ensureFileExists()
-        let fd = open(ConfigStore.directory.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
-        src.setEventHandler { [weak self] in self?.schedule() }
+        // La cartella: per gli editor che salvano sostituendo il file.
+        dirSource = Self.watch(ConfigStore.directory.path, events: [.write, .rename, .delete]) { [weak self] _ in
+            self?.watchFile()
+            self?.schedule()
+        }
+        // Il file: per chi lo riscrive al suo posto (senza crearne uno nuovo).
+        watchFile()
+    }
+
+    private func watchFile() {
+        fileSource?.cancel()
+        fileSource = Self.watch(ConfigStore.fileURL.path, events: [.write, .extend, .delete, .rename]) { [weak self] event in
+            if !event.intersection([.delete, .rename]).isEmpty { self?.fileSource?.cancel(); self?.fileSource = nil }
+            self?.schedule()
+        }
+    }
+
+    private static func watch(_ path: String, events: DispatchSource.FileSystemEvent,
+                              handler: @escaping (DispatchSource.FileSystemEvent) -> Void) -> DispatchSourceFileSystemObject? {
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return nil }
+        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: events, queue: .main)
+        src.setEventHandler { [weak src] in handler(src?.data ?? []) }
         src.setCancelHandler { close(fd) }
         src.resume()
-        source = src
+        return src
     }
 
     private func schedule() {
@@ -264,7 +288,10 @@ final class ConfigWatcher {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
     }
 
-    deinit { source?.cancel() }
+    deinit {
+        dirSource?.cancel()
+        fileSource?.cancel()
+    }
 }
 
 // MARK: - Utilità colore

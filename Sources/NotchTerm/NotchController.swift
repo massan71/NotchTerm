@@ -166,6 +166,7 @@ final class NotchController: NSObject {
     private var metrics = NotchMetrics(width: 190, height: 32, hasHardwareNotch: false)
     private var fontDelta: CGFloat = 0
     private var terminalFrame = NSRect(x: 0, y: 0, width: 500, height: 250)
+    private var headerHeight: CGFloat = 32
 
     var onOpenConfig: (() -> Void)?
     /// Chiamato appena prima di aprire il pannello.
@@ -439,7 +440,7 @@ final class NotchController: NSObject {
     /// Sul terminale: incolla i percorsi, già pronti per la shell.
     private func dropFiles(_ urls: [URL], at point: NSPoint) -> Bool {
         guard config.notchZone.dropFiles else { return false }
-        let headerBottom = root.bounds.height - metrics.height - 4
+        let headerBottom = root.bounds.height - headerHeight - 4
         if point.y >= headerBottom {
             for url in urls {
                 var isDir: ObjCBool = false
@@ -794,17 +795,22 @@ final class NotchController: NSObject {
         let sf = screen.frame
 
         func resolve(_ v: Double, _ total: CGFloat) -> CGFloat { v <= 1 ? CGFloat(v) * total : CGFloat(v) }
+        // Sotto la barra dei menu il pannello parte dal suo bordo inferiore.
+        let below = config.belowMenuBar
+        let topInset = below ? NotchMetrics.menuBarHeight(screen) : 0
         let bodyW = min(sf.width - 2 * ear, max(metrics.width + 120, resolve(config.width, sf.width)))
-        let bodyH = min(sf.height, max(metrics.height + 80, resolve(config.height, sf.height)))
+        let bodyH = min(sf.height - topInset, max(metrics.height + 80, resolve(config.height, sf.height)))
         let w = bodyW + 2 * ear
 
-        panel.setFrame(NSRect(x: sf.midX - w / 2, y: sf.maxY - bodyH, width: w, height: bodyH), display: false)
+        panel.setFrame(NSRect(x: sf.midX - w / 2, y: sf.maxY - topInset - bodyH, width: w, height: bodyH), display: false)
         root.frame = NSRect(x: 0, y: 0, width: w, height: bodyH)
         root.needsLayout = true
         root.layoutSubtreeIfNeeded()
 
         let pad = CGFloat(max(0, config.padding))
-        let headerH = metrics.height
+        // Dal notch l'header è alto quanto il notch; sotto la barra dei menu basta una riga.
+        let headerH = below ? 30 : metrics.height
+        headerHeight = headerH
         terminalFrame = NSRect(x: ear + pad, y: pad * 0.75,
                                width: bodyW - 2 * pad,
                                height: bodyH - headerH - pad * 0.75 - 6)
@@ -820,8 +826,17 @@ final class NotchController: NSObject {
         newTabButton.frame = NSRect(x: rightEdge - 20, y: bodyH - headerH + (headerH - 20) / 2, width: 20, height: 20)
         aiButton.frame = NSRect(x: newTabButton.frame.minX - 26, y: newTabButton.frame.minY, width: 20, height: 20)
         let mediaRight = (aiButton.isHidden ? newTabButton.frame.minX : aiButton.frame.minX) - 10
-        mediaView.frame = NSRect(x: notchRight, y: bodyH - headerH,
-                                 width: max(0, mediaRight - notchRight), height: headerH)
+        if below {
+            // Niente notch da evitare: schede a sinistra, mini-player a destra.
+            let showsMedia = mediaTrack != nil && config.media.enabled && config.media.showInHeader
+            let mediaW: CGFloat = showsMedia ? min(280, (mediaRight - leftEdge) * 0.4) : 0
+            mediaView.frame = NSRect(x: mediaRight - mediaW, y: bodyH - headerH, width: mediaW, height: headerH)
+            let tabsRight = (showsMedia ? mediaView.frame.minX : mediaRight) - 10
+            tabBar.frame = NSRect(x: leftEdge, y: bodyH - headerH, width: max(0, tabsRight - leftEdge), height: headerH)
+        } else {
+            mediaView.frame = NSRect(x: notchRight, y: bodyH - headerH,
+                                     width: max(0, mediaRight - notchRight), height: headerH)
+        }
         refreshTabBar()
         refreshMedia()
     }
@@ -834,6 +849,11 @@ final class NotchController: NSObject {
 
     private func collapsedPath() -> CGPath {
         let b = root.bounds
+        if config.belowMenuBar {
+            // Il pannello si srotola dalla barra dei menu: si parte da una striscia sottile.
+            let strip = CGRect(x: ear, y: b.height - 2, width: b.width - 2 * ear, height: 2)
+            return NotchShape.path(body: strip, ear: ear, radius: CGFloat(config.cornerRadius))
+        }
         let body = CGRect(x: b.midX - metrics.width / 2, y: b.height - metrics.height,
                           width: metrics.width, height: metrics.height)
         return NotchShape.path(body: body, ear: min(ear, 6), radius: min(metrics.height * 0.35, 12))
@@ -848,7 +868,13 @@ final class NotchController: NSObject {
     // MARK: - Musica
 
     func updateMedia(track: NowPlayingTrack?, artwork: NSImage?) {
+        let appeared = (mediaTrack == nil) != (track == nil)
         mediaTrack = track
+        // Sotto la barra dei menu lo spazio del mini-player si ricava dalle schede: va ridisposto.
+        if appeared, config.belowMenuBar, isOpen {
+            layoutForCurrentScreen()
+            setPath(expandedPath())
+        }
         mediaArtwork = artwork
         refreshMedia()
     }

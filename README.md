@@ -171,6 +171,7 @@ Si ricarica **da solo al salvataggio**. Basta scrivere le chiavi da cambiare, pe
 | `padding` | `14` | Margine attorno al testo |
 | `animation` | `{"style": "spring", "duration": 0.42, "damping": 0.82}` | `spring`, `ease`, `none`; `damping` più basso = più rimbalzo |
 | `hideOnFocusLoss` | `true` | Si chiude quando clicchi altrove |
+| `position` | `"notch"` | `"notch"`: il pannello esce dal notch, sopra la barra dei menu; `"menubar"`: appare sotto la barra dei menu, che resta visibile |
 | `screen` | `"notch"` | `notch`, `main`, `mouse` |
 | `shell`, `shellArgs` | `$SHELL`, `["-l"]` | Shell da avviare |
 | `workingDirectory` | `"~"` | Cartella iniziale |

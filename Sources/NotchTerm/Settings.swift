@@ -400,6 +400,10 @@ private struct AppearanceTab: View {
                 }
             }
             Section("Forma e dimensioni") {
+                Picker("Posizione", selection: $model.config.position) {
+                    Text("Esce dal notch").tag("notch")
+                    Text("Sotto la barra dei menu").tag("menubar")
+                }
                 LabeledSlider(title: "Larghezza", value: model.fractionBinding(\.width, total: screen.width), range: 0.25...1, format: percent)
                 LabeledSlider(title: "Altezza", value: model.fractionBinding(\.height, total: screen.height), range: 0.2...1, format: percent)
                 LabeledSlider(title: "Angoli in basso", value: $model.config.cornerRadius, range: 0...48, format: points)

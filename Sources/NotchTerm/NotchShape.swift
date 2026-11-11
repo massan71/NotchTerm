@@ -50,6 +50,12 @@ struct NotchMetrics {
 }
 
 extension NotchMetrics {
+    /// Altezza della barra dei menu su questo schermo (anche se è nascosta in automatico,
+    /// sugli schermi col notch resta l'altezza del notch).
+    static func menuBarHeight(_ screen: NSScreen) -> CGFloat {
+        max(screen.frame.maxY - screen.visibleFrame.maxY, screen.safeAreaInsets.top)
+    }
+
     /// Lo schermo su cui mostrare il pannello secondo l'opzione "screen".
     static func targetScreen(_ config: Config) -> NSScreen {
         switch config.screen.lowercased() {
